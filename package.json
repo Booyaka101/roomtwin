@@ -1,0 +1,51 @@
+{
+  "name": "roomtwin-card",
+  "version": "0.1.0",
+  "description": "Home Assistant dashboard card that shows a Gaussian splat of your room and binds lights and sensors to where they really are",
+  "license": "MIT",
+  "author": "Booyaka101",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Booyaka101/roomtwin.git"
+  },
+  "homepage": "https://github.com/Booyaka101/roomtwin#readme",
+  "bugs": "https://github.com/Booyaka101/roomtwin/issues",
+  "keywords": [
+    "home-assistant",
+    "lovelace",
+    "custom-card",
+    "hacs",
+    "gaussian-splatting",
+    "3d",
+    "spark",
+    "threejs",
+    "digital-twin"
+  ],
+  "private": true,
+  "type": "module",
+  "main": "dist/roomtwin-card.js",
+  "files": [
+    "dist/roomtwin-card.js"
+  ],
+  "scripts": {
+    "build": "rollup -c",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sparkjsdev/spark": "2.2.0",
+    "lit": "3.3.3",
+    "three": "0.186.1"
+  },
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "16.0.3",
+    "@rollup/plugin-terser": "1.0.0",
+    "@rollup/plugin-typescript": "12.3.0",
+    "@types/three": "0.186.0",
+    "rollup": "4.63.5",
+    "tslib": "2.8.1",
+    "typescript": "5.9.3",
+    "vitest": "5.0.2",
+    "yaml": "2.9.1"
+  }
+}

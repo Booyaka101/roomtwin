@@ -1,0 +1,6 @@
+{
+  "name": "RoomTwin",
+  "render_readme": true,
+  "filename": "roomtwin-card.js",
+  "homeassistant": "2024.11.0"
+}

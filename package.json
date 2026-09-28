@@ -30,7 +30,8 @@
   "scripts": {
     "build": "rollup -c",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "demo": "npm run build && node demo/build.mjs"
   },
   "dependencies": {
     "@sparkjsdev/spark": "2.2.0",
@@ -38,6 +39,7 @@
     "three": "0.186.1"
   },
   "devDependencies": {
+    "@mdi/js": "7.4.47",
     "@rollup/plugin-node-resolve": "16.0.3",
     "@rollup/plugin-terser": "1.0.0",
     "@rollup/plugin-typescript": "12.3.0",

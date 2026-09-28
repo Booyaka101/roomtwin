@@ -68,10 +68,16 @@ export function spokenState(hass: HomeAssistant, stateObj: HassEntity | undefine
 }
 
 const ACTIVE_STATES = new Set(["on", "open", "opening", "closing", "playing", "home", "heat", "cool", "heat_cool"]);
+// Binary sensors whose "on" means something to look at: an open door or window, smoke, a leak.
+const ALERT_CLASSES = new Set([
+  "door", "garage_door", "window", "opening", "smoke", "gas", "carbon_monoxide", "moisture", "safety", "problem", "tamper",
+]);
 
-export function pinState(stateObj: HassEntity | undefined): "missing" | "unavailable" | "active" | "idle" {
+export function pinState(stateObj: HassEntity | undefined): "missing" | "unavailable" | "alert" | "active" | "idle" {
   if (!stateObj) return "missing";
   if (stateObj.state === "unavailable") return "unavailable";
+  const alert = stateObj.state === "on" && domainOf(stateObj.entity_id) === "binary_sensor";
+  if (alert && ALERT_CLASSES.has(String(stateObj.attributes.device_class))) return "alert";
   return ACTIVE_STATES.has(stateObj.state) ? "active" : "idle";
 }
 

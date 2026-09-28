@@ -52,7 +52,7 @@ export const LIGHT_DEFAULTS = { radius: 1.0, soft_edge: 0.5, off_dim: 0.45 };
 export const SPLAT_EXTENSIONS = ["spz", "ply", "splat", "ksplat", "sog", "rad"];
 
 const ENTITY_ID = /^[a-z0-9_]+\.[a-z0-9_]+$/;
-export const ICON = /^[a-z0-9-]+:[a-z0-9-]+$/;
+export const ICON = /^[\w-]+:[\w-]+$/;
 
 const TOP_KEYS = [
   "type", "splat", "up", "floor", "ceiling_cut", "aspect_ratio", "lod", "lod_scale", "camera", "lights", "pins",
@@ -136,10 +136,15 @@ function list(value: unknown, path: string): unknown[] {
 /** Width over height for a validated aspect_ratio value; 16:9 when unset. */
 export function aspectRatio(value: unknown): number {
   if (unset(value)) return 16 / 9;
-  if (typeof value === "number" && value > 0 && Number.isFinite(value)) return value;
-  const match = typeof value === "string" ? /^\s*(\d+(?:\.\d+)?)\s*[:/x]\s*(\d+(?:\.\d+)?)\s*$/.exec(value) : null;
-  if (match && Number(match[1]) > 0 && Number(match[2]) > 0) return Number(match[1]) / Number(match[2]);
-  throw new ConfigError(`aspect_ratio must look like "16:9" or be a positive number, got ${describe(value)}`);
+  const match = typeof value === "string" ? /^\s*(\d+(?:\.\d+)?)\s*(?:[:/x]\s*(\d+(?:\.\d+)?)\s*)?$/.exec(value) : null;
+  const ratio = match ? Number(match[1]) / Number(match[2] ?? 1) : typeof value === "number" ? value : NaN;
+  if (ratio >= 0.1 && ratio <= 10) return ratio;
+  if (typeof value === "number" && Number.isInteger(value) && value > 60) {
+    // YAML 1.1, which YAML-mode dashboards use, reads an unquoted 16:9 as the base-60 number 969.
+    const guess = `${Math.floor(value / 60)}:${value % 60}`;
+    throw new ConfigError(`aspect_ratio ${value} is how YAML reads an unquoted ${guess}. Put it in quotes: "${guess}"`);
+  }
+  throw new ConfigError(`aspect_ratio must look like "16:9" or be a number from 0.1 to 10, got ${describe(value)}`);
 }
 
 /** The name and icon overrides both kinds of binding share. */

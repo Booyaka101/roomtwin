@@ -17,7 +17,18 @@ const fileBytes = new Uint8Array(
     process.exit(1);
   }),
 );
-const { fileBytes: spz } = await transcodeSpz({ inputs: [{ fileBytes, pathOrUrl: input }], maxSh: 3 });
+// Spark compiles its wasm in the background on import and exports no promise for it, so retry until it is ready.
+async function transcode(options) {
+  for (let waited = 0; ; waited += 50) {
+    try {
+      return await transcodeSpz(options);
+    } catch (err) {
+      if (waited > 10000 || !String(err?.message).includes("__wbindgen")) throw err;
+      await new Promise((done) => setTimeout(done, 50));
+    }
+  }
+}
+const { fileBytes: spz } = await transcode({ inputs: [{ fileBytes, pathOrUrl: input }], maxSh: 3 });
 await writeFile(output, spz);
 const mb = (n) => (n / 1024 / 1024).toFixed(1);
 console.log(`${input} (${mb(fileBytes.length)} MB) -> ${output} (${mb(spz.length)} MB) in ${((Date.now() - started) / 1000).toFixed(1)} s`);

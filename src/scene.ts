@@ -289,6 +289,19 @@ export class RoomScene {
     this.requestRender();
   }
 
+  /** Remembers the camera so undoDrag() can put it back. */
+  markView(): void {
+    this.controls.saveState();
+  }
+
+  /** Puts the camera back where markView() left it, dropping the motion damping would still carry on. */
+  undoDrag(): void {
+    this.controls.enableDamping = false;
+    this.controls.update();
+    this.controls.enableDamping = true;
+    this.controls.reset();
+  }
+
   /** Current camera in capture coordinates, so it survives a later change of up axis. */
   currentView(): CameraView {
     const toCapture = this.root.matrixWorld.clone().invert();

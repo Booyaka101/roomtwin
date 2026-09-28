@@ -54,6 +54,11 @@ test("pinState", () => {
   expect(pinState(entity("light.a", "on"))).toBe("active");
   expect(pinState(entity("cover.a", "open"))).toBe("active");
   expect(pinState(entity("light.a", "off"))).toBe("idle");
+  expect(pinState(entity("binary_sensor.balcony", "on", { device_class: "door" }))).toBe("alert");
+  expect(pinState(entity("binary_sensor.kitchen_leak", "on", { device_class: "moisture" }))).toBe("alert");
+  expect(pinState(entity("binary_sensor.balcony", "off", { device_class: "door" }))).toBe("idle");
+  expect(pinState(entity("binary_sensor.hall", "on", { device_class: "motion" }))).toBe("active");
+  expect(pinState(entity("binary_sensor.plain", "on"))).toBe("active");
 });
 
 describe("projectToScreen", () => {

@@ -120,25 +120,25 @@ describe("toYaml", () => {
 
 describe("roomRanges", () => {
   test("a metric room gets centimetre steps and a cut just under its ceiling", () => {
-    expect(roomRanges(2.6)).toEqual({ step: 0.01, radiusMax: 5.2, softEdgeMax: 2.6, cutMax: 3.2, suggestedCut: 2.34 });
+    expect(roomRanges(2.6)).toEqual({ step: 0.01, radiusMax: 5.2, softEdgeMax: 2.6, cutMax: 3.2, suggestedCut: 2.34, radius: 1, softEdge: 0.5 });
   });
 
   test("an unscaled COLMAP capture gets ranges that fit it", () => {
-    expect(roomRanges(8.62)).toEqual({ step: 0.01, radiusMax: 17.3, softEdgeMax: 8.7, cutMax: 10.4, suggestedCut: 7.76 });
+    expect(roomRanges(8.62)).toEqual({ step: 0.01, radiusMax: 17.3, softEdgeMax: 8.7, cutMax: 10.4, suggestedCut: 7.76, radius: 3.4, softEdge: 1.7 });
   });
 
   test("a capture in small units gets finer steps", () => {
-    expect(roomRanges(0.4)).toEqual({ step: 0.001, radiusMax: 0.8, softEdgeMax: 0.4, cutMax: 0.48, suggestedCut: 0.36 });
+    expect(roomRanges(0.4)).toEqual({ step: 0.001, radiusMax: 0.8, softEdgeMax: 0.4, cutMax: 0.48, suggestedCut: 0.36, radius: 0.16, softEdge: 0.08 });
   });
 
   test("very large and very small captures get whole or fine steps without float noise", () => {
-    expect(roomRanges(150)).toMatchObject({ step: 1, radiusMax: 300, cutMax: 180 });
+    expect(roomRanges(150)).toMatchObject({ step: 1, radiusMax: 300, cutMax: 180, radius: 60, softEdge: 30 });
     expect(roomRanges(0.05).step).toBe(0.0001);
     expect(roomRanges(0.005).step).toBe(0.00001);
   });
 
   test("an empty or flat capture falls back to a normal room", () => {
-    expect(roomRanges(0)).toEqual({ step: 0.01, radiusMax: 5, softEdgeMax: 2.5, cutMax: 3, suggestedCut: 2.25 });
+    expect(roomRanges(0)).toEqual({ step: 0.01, radiusMax: 5, softEdgeMax: 2.5, cutMax: 3, suggestedCut: 2.25, radius: 1, softEdge: 0.5 });
   });
 });
 

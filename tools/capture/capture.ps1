@@ -41,7 +41,9 @@ function Resolve-Tool([string]$Exe, [string]$Hint) {
 if (-not (Test-Path -LiteralPath $Source)) { throw "Source not found: $Source" }
 $Source = (Resolve-Path -LiteralPath $Source).Path
 $isVideo = -not (Test-Path -LiteralPath $Source -PathType Container)
-if (-not $Name) { $Name = [IO.Path]::GetFileNameWithoutExtension($Source) }
+if (-not $Name) {
+  $Name = if ($isVideo) { [IO.Path]::GetFileNameWithoutExtension($Source) } else { [IO.Path]::GetFileName($Source.TrimEnd('\')) }
+}
 if (-not $WorkDir) { $WorkDir = Join-Path (Get-Location) "roomtwin-capture\$Name" }
 # Windows PowerShell passes a quoted path ending in \ to native tools as an escaped quote.
 $WorkDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($WorkDir).TrimEnd('\')

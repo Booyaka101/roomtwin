@@ -45,6 +45,9 @@ export interface RoomRanges {
   softEdgeMax: number;
   cutMax: number;
   suggestedCut: number;
+  /** Starting size of a new light: 1 m and 0.5 m in a 2.5 m room. */
+  radius: number;
+  softEdge: number;
 }
 
 /**
@@ -62,6 +65,8 @@ export function roomRanges(roomHeight: number): RoomRanges {
     softEdgeMax: roundUp(height),
     cutMax: roundUp(height * 1.2),
     suggestedCut: round(height * 0.9, places),
+    radius: round(height * 0.4, places - 1),
+    softEdge: round(height * 0.2, places - 1),
   };
 }
 
@@ -286,7 +291,9 @@ export class RoomTwinEditor extends LitElement {
     const entity = this._entity.trim();
     const anchor = this._pending;
     if (kind === "light") {
-      this.commit({ ...this.config, lights: [...this.config.lights, { entity, anchor, ...LIGHT_DEFAULTS }] });
+      const { radius, softEdge } = roomRanges(this.getRoomHeight());
+      const light = { entity, anchor, radius, soft_edge: softEdge, off_dim: LIGHT_DEFAULTS.off_dim };
+      this.commit({ ...this.config, lights: [...this.config.lights, light] });
       this._selected = { kind, index: this.config.lights.length - 1 };
     } else {
       this.commit({ ...this.config, pins: [...this.config.pins, { entity, anchor }] });
@@ -441,6 +448,7 @@ export class RoomTwinEditor extends LitElement {
             max=${Math.max(cutMax, cut ?? 0)}
             step=${step}
             ?disabled=${cut === undefined}
+            aria-label="Ceiling cut height"
             .value=${String(cut ?? suggestedCut)}
             @input=${(e: Event) => this.commit({ ...this.config, ceiling_cut: Number((e.target as HTMLInputElement).value) })}
           />

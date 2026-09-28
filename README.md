@@ -97,7 +97,10 @@ The card's visual editor in the dashboard dialog covers the plain options: the s
 - **Long-press** any pin to open the more-info dialog. Tapping a sensor, an unavailable entity or anything else without a tap action opens more-info too.
 - From the keyboard, Tab to a pin, then Enter or Space taps it, and Shift+Enter or the menu key opens more-info. Screen readers hear the pin's name and state.
 - Sensor pins show the current state with its unit and update live.
+- A binary sensor pin turns red while it has something to look at: an open door, window or garage door, or smoke, gas, carbon monoxide, a leak, a safety problem or tampering.
 - A pin whose entity doesn't exist shows as a grey question mark, so a renamed entity is easy to spot.
+- Drag to look around and right-drag to pan. Scrolling over the card scrolls the dashboard as usual, so zoom by holding Ctrl while you scroll, or pinch. In edit mode the scroll wheel zooms on its own.
+- On a touch screen, swipe sideways to turn the view and pinch to zoom. An up or down swipe scrolls the dashboard.
 - A card doesn't download its room until it first scrolls into view, and cards that are off-screen or on a hidden tab stop rendering entirely. Several rooms on one dashboard only cost what you look at.
 
 ## Configuration reference
@@ -130,7 +133,7 @@ pins:
 | `floor` | `0` | Height of the floor along `up`, in capture coordinates. Written by the floor tool. |
 | `ceiling_cut` | off | Hides everything more than this far above the floor, so you can look down into the room. Taps go through the cut part. |
 | `camera` | middle of the room | Default view, `position` and `target` in capture coordinates. Written by **Use this view as default**. |
-| `aspect_ratio` | `16:9` | Card shape, as `"4:3"` or a number like `1.5`. |
+| `aspect_ratio` | `16:9` | Card shape, as `"4:3"` or a number like `1.5`. Keep the quotes: YAML reads an unquoted 16:9 as the number 969, and the card says so. |
 | `lod` | `true` | Spark's level of detail, which keeps large captures smooth. Leave it on unless a capture renders wrongly. |
 | `lod_scale` | `1` | How many splats level of detail may draw, from 0.1 to 8. Lower it for a slow tablet, raise it on a strong desktop GPU. |
 | `lights[].entity` | required | A `light` or `switch` entity. |
@@ -178,6 +181,7 @@ The card explains every failure it knows about:
 
 - A light region is a sphere, so it also brightens whatever else is inside it, like the wall behind the lamp. There is no relighting.
 - COLMAP captures have no real-world scale, so the "(m)" on the sliders only means metres for Scaniverse captures.
+- On a touch screen an up or down swipe scrolls the dashboard, so tilting the view up or down with a finger only works in edit mode. Save the tilt you like with **Use this view as default**.
 - While the dashboard's card editor is open, its preview holds a second copy of the room in memory, freed a minute after the dialog closes.
 - The preview in the "Add card" picker points at `/local/roomtwin/room.spz`, which won't exist, so it shows the message explaining where to put the file.
 
@@ -191,6 +195,8 @@ npm run build     # writes dist/roomtwin-card.js
 ```
 
 The card uses Lit, three.js and [Spark](https://sparkjs.dev) 2.2.0, bundled by Rollup into one file.
+
+`npm run demo -- --serve` builds the live demo, the card on a real room with a simulated home around it, and serves it at http://localhost:4173. It needs a scan and the card's YAML in `demo/`; [demo/README.md](demo/README.md) covers that and publishing it on GitHub Pages.
 
 To release, bump `version` in `package.json` and `src/version.ts` (a test keeps them equal), then publish a GitHub release tagged `v<version>`. The release workflow builds the card, attaches `roomtwin-card.js` to the release and runs the HACS check. HACS installs from the release asset.
 

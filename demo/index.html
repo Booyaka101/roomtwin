@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RoomTwin live demo</title>
+    <meta name="description" content="Try the RoomTwin Home Assistant card in your browser: a 3D scan of a room with its lights and sensors pinned where they really are." />
+    <meta property="og:title" content="RoomTwin live demo" />
+    <meta property="og:description" content="A Home Assistant card that shows a 3D scan of your room with your devices where they really are. Try it in your browser." />
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        color-scheme: dark;
+        --primary-color: #03a9f4;
+        --primary-text-color: #e1e1e1;
+        --secondary-text-color: #9b9b9b;
+        --divider-color: rgba(225, 225, 225, 0.12);
+        --card-background-color: #1c1c1c;
+        --text-primary-color: #ffffff;
+        --error-color: #db4437;
+        --state-light-active-color: #ffc107;
+        --code-font-family: ui-monospace, Consolas, monospace;
+        font-family: Roboto, system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: #111111;
+        color: var(--primary-text-color);
+      }
+      body { margin: 0; }
+      main { max-width: 1280px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 300px; align-items: start; }
+      header.intro { grid-column: 1 / -1; }
+      h1 { font-size: 1.5rem; margin: 0 0 6px; font-weight: 500; }
+      .intro p { margin: 4px 0; color: var(--secondary-text-color); line-height: 1.5; max-width: 72ch; }
+      a { color: var(--primary-color); }
+      #card { min-height: 200px; }
+      aside { background: var(--card-background-color); border-radius: 12px; padding: 12px 14px; }
+      aside h2 { font-size: 1rem; font-weight: 500; margin: 0 0 2px; }
+      aside > p { margin: 0 0 8px; font-size: 0.85rem; color: var(--secondary-text-color); }
+      ul { list-style: none; margin: 0; padding: 0; }
+      li { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--divider-color); }
+      .icon { flex: none; width: 24px; height: 24px; color: var(--secondary-text-color); }
+      .icon.active { color: var(--state-light-active-color); }
+      .icon svg { width: 24px; height: 24px; fill: currentColor; display: block; }
+      .name { flex: 1; min-width: 0; font-size: 0.9rem; }
+      .name small { display: block; color: var(--secondary-text-color); font-size: 0.8rem; }
+      button { font: inherit; font-size: 0.85rem; color: var(--primary-color); background: transparent; border: 1px solid var(--divider-color); border-radius: 18px; padding: 5px 12px; cursor: pointer; }
+      button:hover { background: rgba(3, 169, 244, 0.1); }
+      button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+      button.on { background: var(--primary-color); color: var(--text-primary-color); border-color: transparent; }
+      dialog { background: var(--card-background-color); color: var(--primary-text-color); border: none; border-radius: 16px; width: min(360px, calc(100vw - 32px)); padding: 16px 20px 20px; }
+      dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+      dialog header { display: flex; align-items: center; gap: 12px; }
+      dialog h2 { flex: 1; font-size: 1.15rem; font-weight: 500; margin: 0; }
+      dialog .close { border: none; font-size: 1.4rem; line-height: 1; padding: 4px 10px; color: var(--secondary-text-color); }
+      dialog .state { font-size: 1.6rem; margin: 18px 0; }
+      dialog .controls { display: grid; gap: 14px; justify-items: start; }
+      dialog .entity { margin: 18px 0 0; font-family: var(--code-font-family); font-size: 0.8rem; color: var(--secondary-text-color); }
+      .slider { display: grid; gap: 6px; width: 100%; font-size: 0.85rem; color: var(--secondary-text-color); }
+      .slider input { width: 100%; accent-color: var(--state-light-active-color); }
+      .swatches { display: flex; gap: 10px; }
+      .swatches button { width: 32px; height: 32px; padding: 0; border-radius: 50%; border: 2px solid var(--divider-color); }
+      #toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 120px); background: #323232; color: #fff; padding: 12px 18px; border-radius: 6px; max-width: calc(100vw - 48px); transition: transform 0.2s; font-size: 0.9rem; }
+      #toast.shown { transform: translate(-50%, 0); }
+      @media (max-width: 860px) {
+        main { grid-template-columns: minmax(0, 1fr); padding: 10px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header class="intro">
+        <h1>RoomTwin</h1>
+        <p>
+          This is the real <a href="https://github.com/Booyaka101/roomtwin">RoomTwin</a> Home Assistant card, running on a
+          scan of a real room. The home behind it is simulated in your browser, so nothing here controls actual devices.
+        </p>
+        <p>
+          Tap a light to switch it and watch its part of the room change. Press and hold a pin for its details and colour
+          controls. Drag to look around, pinch or hold Ctrl and scroll to zoom. The pencil opens the editor you'd use to place pins in
+          your own room. Changes aren't saved anywhere.
+        </p>
+        <p>
+          Want it for your own rooms? The <a href="https://github.com/Booyaka101/roomtwin#readme">README</a> covers scanning a
+          room and installing the card with HACS.
+        </p>
+      </header>
+      <div id="card">Loading the room…</div>
+      <aside>
+        <h2>The simulated home</h2>
+        <p>Flip these like the real devices would, and the card follows.</p>
+        <ul id="home-list"></ul>
+      </aside>
+    </main>
+    <dialog id="more-info" aria-labelledby="more-info-title"></dialog>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="demo.js"></script>
+  </body>
+</html>

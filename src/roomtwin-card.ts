@@ -48,6 +48,7 @@ export class RoomTwinCard extends LitElement {
     _editing: { state: true },
     _status: { state: true },
     _warning: { state: true },
+    _hint: { state: true },
   };
 
   private _hass?: HomeAssistant;
@@ -56,6 +57,8 @@ export class RoomTwinCard extends LitElement {
   private _editing = false;
   private _status: Status = { kind: "loading", progress: 0 };
   private _warning = "";
+  private _hint = "";
+  private hintTimer?: ReturnType<typeof setTimeout>;
 
   private scene?: RoomScene;
   private lights?: LightRig;
@@ -170,6 +173,7 @@ export class RoomTwinCard extends LitElement {
     super.connectedCallback();
     clearTimeout(this.disposeTimer);
     document.addEventListener("visibilitychange", this.onVisibility);
+    for (const type of ["keydown", "keyup", "blur"]) window.addEventListener(type, this.onControlKey, true);
     if (this.hasUpdated) {
       this.observe();
       this.requestUpdate();
@@ -179,6 +183,7 @@ export class RoomTwinCard extends LitElement {
   disconnectedCallback(): void {
     super.disconnectedCallback();
     document.removeEventListener("visibilitychange", this.onVisibility);
+    for (const type of ["keydown", "keyup", "blur"]) window.removeEventListener(type, this.onControlKey, true);
     this.intersection?.disconnect();
     this.resize?.disconnect();
     this.onScreen = false;
@@ -208,6 +213,14 @@ export class RoomTwinCard extends LitElement {
   private onVisibility = (): void => {
     this.updateActive();
     if (document.visibilityState === "visible") this.requestUpdate();
+  };
+
+  // OrbitControls listens for Ctrl on the canvas's root node, this shadow root, to tell a held Ctrl from a trackpad
+  // pinch. Focus is rarely inside the card, so without this every Ctrl+wheel notch zooms ten times too far.
+  // Leaving the window (Ctrl+Tab) sends the keyup elsewhere, so a blur counts as letting go.
+  private onControlKey = (e: Event): void => {
+    if (e.type === "blur") this.renderRoot.dispatchEvent(new KeyboardEvent("keyup", { key: "Control" }));
+    else if ((e as KeyboardEvent).key === "Control") this.renderRoot.dispatchEvent(new KeyboardEvent(e.type, { key: "Control" }));
   };
 
   private teardown(): void {
@@ -398,9 +411,43 @@ export class RoomTwinCard extends LitElement {
     }
   }
 
+  // Scrolling a dashboard past the card should scroll it, so outside edit mode zooming takes Ctrl, as on embedded maps.
+  private readonly onStageWheel = {
+    capture: true,
+    handleEvent: (e: WheelEvent) => {
+      if (this._editing || e.ctrlKey || e.metaKey) {
+        // Pins sit on top of the canvas, and a zoom that starts on one would otherwise zoom the whole page.
+        const canvas = this.canvasHost?.querySelector("canvas");
+        if (canvas && (e.target as Element).closest(".pin")) {
+          e.preventDefault();
+          canvas.dispatchEvent(new WheelEvent(e.type, e));
+        }
+        return;
+      }
+      e.stopPropagation();
+      this._hint = "Hold Ctrl and scroll to zoom";
+      clearTimeout(this.hintTimer);
+      this.hintTimer = setTimeout(() => (this._hint = ""), 1500);
+    },
+  };
+
+  // The canvas lets one finger scroll the page vertically; a second finger must not scroll it too.
+  private readonly onStageTouch = {
+    passive: false,
+    handleEvent: (e: TouchEvent) => {
+      if (e.touches.length > 1 && e.cancelable) e.preventDefault();
+    },
+  };
+
   private onStageDown(e: PointerEvent): void {
     if (!e.isPrimary) this.handToControls();
-    this.tapStart = this._editing && e.isPrimary ? { x: e.clientX, y: e.clientY, t: e.timeStamp } : undefined;
+    else if (e.pointerType === "touch") this.scene?.markView();
+    this.tapStart = this._editing && e.isPrimary && e.button === 0 ? { x: e.clientX, y: e.clientY, t: e.timeStamp } : undefined;
+  }
+
+  // The browser cancels a finger once it decides the swipe scrolls the page, by which time the orbit has turned a little.
+  private onStageCancel(e: PointerEvent): void {
+    if (e.isPrimary && e.pointerType === "touch" && !this._editing) this.scene?.undoDrag();
   }
 
   private onStageUp(e: PointerEvent): void {
@@ -471,9 +518,12 @@ export class RoomTwinCard extends LitElement {
     if (status.kind === "ready") return nothing;
     if (status.kind === "loading") {
       const text = status.progress < 1 ? `Loading room ${Math.round(status.progress * 100)}%` : "Preparing room";
-      return html`<div class="overlay" role="status">
-        <div class="bar"><div style="width: ${Math.round(status.progress * 100)}%"></div></div>
-        <span>${text}</span>
+      const percent = Math.round(status.progress * 100);
+      return html`<div class="overlay">
+        <div class="bar" role="progressbar" aria-label="Loading room" aria-valuenow=${percent} aria-valuetext=${text}>
+          <div style="width: ${percent}%"></div>
+        </div>
+        <span aria-hidden="true">${text}</span>
       </div>`;
     }
     return html`<div class="overlay">
@@ -488,8 +538,19 @@ export class RoomTwinCard extends LitElement {
     if (!config) return nothing;
     const ready = this._status.kind === "ready";
     return html`<ha-card>
-      <div class="stage" style="aspect-ratio: ${aspectRatio(config.aspect_ratio)}">
-        <div class="canvas" @pointerdown=${this.onStageDown} @pointerup=${this.onStageUp}></div>
+      <div
+        class="stage ${this._editing ? "editing" : ""}"
+        style="aspect-ratio: ${aspectRatio(config.aspect_ratio)}"
+        @wheel=${this.onStageWheel}
+      >
+        <div
+          class="canvas"
+          @pointerdown=${this.onStageDown}
+          @pointerup=${this.onStageUp}
+          @pointercancel=${this.onStageCancel}
+          @touchstart=${this.onStageTouch}
+          @touchmove=${this.onStageTouch}
+        ></div>
         ${ready && hass
           ? html`<div
               class="pins"
@@ -504,6 +565,7 @@ export class RoomTwinCard extends LitElement {
             </div>`
           : nothing}
         ${this.renderStatus()}
+        <div class="hint" role="status">${this._hint}</div>
         ${ready
           ? html`<div class="tools">
               <button title="Reset view" aria-label="Reset view" @click=${() => this.scene?.setView(config.camera)}>
@@ -547,6 +609,29 @@ export class RoomTwinCard extends LitElement {
       position: absolute;
       inset: 0;
     }
+    /* OrbitControls sets touch-action none inline. Outside edit mode a vertical swipe scrolls the dashboard. */
+    .canvas canvas {
+      touch-action: pan-y !important;
+    }
+    .editing .canvas canvas {
+      touch-action: none !important;
+    }
+    .hint {
+      position: absolute;
+      left: 50%;
+      bottom: 12px;
+      transform: translateX(-50%);
+      padding: 6px 12px;
+      border-radius: 16px;
+      background: rgba(0, 0, 0, 0.7);
+      color: #fff;
+      font-size: 13px;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    .hint:empty {
+      opacity: 0;
+    }
     .pins {
       position: absolute;
       inset: 0;
@@ -583,6 +668,11 @@ export class RoomTwinCard extends LitElement {
     .pin.active {
       background: var(--state-light-active-color, #ffb300);
       color: #000;
+    }
+    .pin.alert {
+      /* Darkened so white text passes WCAG AA on HA's default red. */
+      background: color-mix(in srgb, var(--error-color, #db4437) 85%, black);
+      color: #fff;
     }
     .pin.missing,
     .pin.unavailable {

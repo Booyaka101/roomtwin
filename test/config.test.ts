@@ -66,7 +66,9 @@ describe("parseConfig", () => {
     [{ ...base, lod_scale: 20 }, "lod_scale must be at most 8, got 20"],
     [{ ...base, ceiling_cut: -1 }, "ceiling_cut must be at least 0, got -1"],
     [{ ...base, ceiling_cut: "2.3" }, 'ceiling_cut must be a number, got "2.3"'],
-    [{ ...base, aspect_ratio: "wide" }, 'aspect_ratio must look like "16:9" or be a positive number, got "wide"'],
+    [{ ...base, aspect_ratio: "wide" }, 'aspect_ratio must look like "16:9" or be a number from 0.1 to 10, got "wide"'],
+    [{ ...base, aspect_ratio: 969 }, 'aspect_ratio 969 is how YAML reads an unquoted 16:9. Put it in quotes: "16:9"'],
+    [{ ...base, aspect_ratio: 40 }, "aspect_ratio must look like"],
     [{ ...base, camera: { position: [0, 1, 2] } }, "camera.target must be a list of three numbers"],
     [{ ...base, lights: { entity: "light.a" } }, "lights must be a list"],
     [{ ...base, lights: ["light.a"] }, 'lights[0] must be a mapping with entity and anchor, got "light.a"'],
@@ -123,10 +125,10 @@ describe("parseConfig", () => {
     const config = parseConfig({
       ...base,
       lights: [{ entity: "light.a", anchor: [0, 0, 0], name: "Lamp", icon: "mdi:floor-lamp" }],
-      pins: [{ entity: "sensor.t", anchor: [0, 0, 1], name: 21, icon: "hass:thermometer" }],
+      pins: [{ entity: "sensor.t", anchor: [0, 0, 1], name: 21, icon: "local:ceiling_fan" }],
     });
     expect(config.lights[0]).toMatchObject({ name: "Lamp", icon: "mdi:floor-lamp" });
-    expect(config.pins[0]).toEqual({ entity: "sensor.t", anchor: [0, 0, 1], name: "21", icon: "hass:thermometer" });
+    expect(config.pins[0]).toEqual({ entity: "sensor.t", anchor: [0, 0, 1], name: "21", icon: "local:ceiling_fan" });
   });
 
   test("layout keys from older dashboards are kept", () => {
@@ -149,4 +151,9 @@ test("aspectRatio", () => {
   expect(aspectRatio(1.5)).toBe(1.5);
   expect(() => aspectRatio(0)).toThrow(ConfigError);
   expect(() => aspectRatio("0:1")).toThrow(ConfigError);
+  expect(() => aspectRatio("1:0")).toThrow(ConfigError);
+  // HA's visual editor sends text, so a plain number arrives as a string.
+  expect(aspectRatio("1.5")).toBe(1.5);
+  expect(aspectRatio(" 2 ")).toBe(2);
+  expect(() => aspectRatio(243)).toThrow('unquoted 4:3. Put it in quotes: "4:3"');
 });

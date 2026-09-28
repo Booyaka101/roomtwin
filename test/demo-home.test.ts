@@ -1,0 +1,169 @@
+import { afterEach, expect, test, vi } from "vitest";
+import { SimHome, formatState, guessEntity } from "../demo/home";
+import { ICON_NAMES, defaultIcon } from "../demo/icons";
+import { mdiPath } from "../demo/mdi.mjs";
+import { tapService } from "../src/pins";
+import type { HomeAssistant } from "../src/hass";
+
+const NOW = "2026-09-28T10:00:00.000Z";
+
+function home(ids: string[], overrides = {}) {
+  const seen: HomeAssistant[] = [];
+  const sim = new SimHome(ids, overrides, (hass) => seen.push(hass));
+  return { sim, seen };
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+test("entities get a plausible starting state from their id", () => {
+  expect(guessEntity("light.ceiling_lights", NOW)).toMatchObject({ state: "on", attributes: { friendly_name: "Ceiling lights", brightness: 255 } });
+  expect(guessEntity("sensor.living_temperature", NOW)).toMatchObject({ state: "21.5", attributes: { device_class: "temperature", unit_of_measurement: "°C" } });
+  expect(guessEntity("sensor.office_co2", NOW).attributes).toMatchObject({ device_class: "carbon_dioxide", unit_of_measurement: "ppm" });
+  expect(guessEntity("sensor.mystery", NOW)).toMatchObject({ state: "12", attributes: { friendly_name: "Mystery" } });
+  expect(guessEntity("binary_sensor.balcony_door", NOW)).toMatchObject({ state: "off", attributes: { device_class: "door" } });
+  expect(guessEntity("binary_sensor.garage_contact", NOW).attributes.device_class).toBe("garage_door");
+  expect(guessEntity("binary_sensor.front_gate", NOW).attributes.device_class).toBe("opening");
+  expect(guessEntity("binary_sensor.indoor_motion", NOW).attributes.device_class).toBe("motion");
+  expect(guessEntity("cover.garage_door", NOW)).toMatchObject({ state: "closed", attributes: { device_class: "garage" } });
+  expect(guessEntity("scene.movie_time", NOW).state).toBe(NOW);
+  expect(guessEntity("button.doorbell", NOW).state).toBe("unknown");
+  expect(guessEntity("script.bedtime", NOW).state).toBe("off");
+  expect(guessEntity("lock.front", NOW).state).toBe("locked");
+});
+
+test("overrides replace the guessed state and add attributes, and add entities the card doesn't bind", () => {
+  const { sim } = home(["light.lamp"], {
+    "light.lamp": { state: "off", attributes: { friendly_name: "Reading lamp" } },
+    "sensor.outside": { state: "9", attributes: { unit_of_measurement: "°C" } },
+  });
+  expect(sim.states["light.lamp"]).toMatchObject({ state: "off", attributes: { friendly_name: "Reading lamp", brightness: 255 } });
+  expect(sim.states["sensor.outside"].state).toBe("9");
+});
+
+test("toggling a light hands the card a new hass with only that entity replaced", async () => {
+  const { sim, seen } = home(["light.lamp", "sensor.temp"]);
+  const before = sim.hass;
+  await sim.callService("light", "toggle", { entity_id: "light.lamp" });
+  expect(seen).toHaveLength(1);
+  expect(seen[0].states).not.toBe(before.states);
+  expect(seen[0].states["light.lamp"].state).toBe("off");
+  expect(seen[0].states["sensor.temp"]).toBe(before.states["sensor.temp"]);
+  await sim.callService("light", "turn_on", { entity_id: "light.lamp", rgb_color: [255, 0, 0] });
+  expect(sim.states["light.lamp"].attributes).toMatchObject({ rgb_color: [255, 0, 0], color_mode: "hs", brightness: 255 });
+  await sim.callService("light", "turn_on", { entity_id: "light.lamp", color_temp_kelvin: 3000 });
+  expect(sim.states["light.lamp"].attributes.color_mode).toBe("color_temp");
+});
+
+test("a light turned back on keeps its brightness", async () => {
+  const { sim } = home(["light.lamp"]);
+  await sim.callService("light", "turn_on", { entity_id: "light.lamp", brightness: 40 });
+  await sim.callService("light", "turn_off", { entity_id: "light.lamp" });
+  await sim.callService("light", "toggle", { entity_id: "light.lamp" });
+  expect(sim.states["light.lamp"]).toMatchObject({ state: "on", attributes: { brightness: 40 } });
+});
+
+test("covers pass through opening and closing, scripts run and stop", async () => {
+  vi.useFakeTimers();
+  const { sim } = home(["cover.blind", "script.bedtime"]);
+  await sim.callService("cover", "toggle", { entity_id: "cover.blind" });
+  expect(sim.states["cover.blind"].state).toBe("opening");
+  vi.advanceTimersByTime(1500);
+  expect(sim.states["cover.blind"].state).toBe("open");
+  await sim.callService("cover", "close_cover", { entity_id: "cover.blind" });
+  expect(sim.states["cover.blind"].state).toBe("closing");
+  await sim.callService("script", "turn_on", { entity_id: "script.bedtime" });
+  expect(sim.states["script.bedtime"].state).toBe("on");
+  vi.advanceTimersByTime(1500);
+  expect(sim.states["cover.blind"].state).toBe("closed");
+  expect(sim.states["script.bedtime"].state).toBe("off");
+});
+
+test("dispose cancels pending transitions", async () => {
+  vi.useFakeTimers();
+  const { sim, seen } = home(["cover.blind"]);
+  await sim.callService("cover", "open_cover", { entity_id: "cover.blind" });
+  sim.dispose();
+  vi.advanceTimersByTime(5000);
+  expect(seen).toHaveLength(1);
+});
+
+test("scenes and buttons record when they ran, locks lock", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(NOW));
+  const { sim } = home(["scene.movie", "button.doorbell", "lock.front"]);
+  await sim.callService("scene", "turn_on", { entity_id: "scene.movie" });
+  await sim.callService("button", "press", { entity_id: "button.doorbell" });
+  await sim.callService("lock", "unlock", { entity_id: "lock.front" });
+  expect(sim.states["scene.movie"].state).toBe(NOW);
+  expect(sim.states["button.doorbell"].state).toBe(NOW);
+  expect(sim.states["lock.front"].state).toBe("unlocked");
+});
+
+test("services the demo can't simulate, and unknown entities, reject with a message", async () => {
+  const { sim, seen } = home(["light.lamp", "sensor.temp"]);
+  await expect(sim.callService("light", "turn_on", { entity_id: "light.gone" })).rejects.toThrow("light.gone is not in this demo home");
+  await expect(sim.callService("light", "turn_on")).rejects.toThrow("No entity is not in this demo home");
+  await expect(sim.callService("sensor", "reload", { entity_id: "sensor.temp" })).rejects.toThrow("sensor.reload isn't simulated in this demo");
+  expect(seen).toHaveLength(0);
+});
+
+test("every service a card tap sends is one the demo simulates", async () => {
+  const ids = ["light.a", "switch.b", "fan.c", "input_boolean.d", "cover.e", "scene.f", "script.g", "button.h", "input_button.i"];
+  const { sim } = home(ids);
+  for (const id of ids) {
+    const call = tapService(sim.states[id]);
+    expect(call, id).not.toBeNull();
+    await expect(sim.callService(call!.domain, call!.service, { entity_id: id })).resolves.toBeUndefined();
+  }
+  sim.dispose();
+});
+
+test("drift moves numeric sensors by one step and leaves the rest alone", () => {
+  const { sim } = home(["sensor.temperature", "sensor.humidity", "sensor.energy", "sensor.mystery", "light.lamp"]);
+  sim.drift(() => 0.9);
+  expect(sim.states["sensor.temperature"].state).toBe("21.6");
+  expect(sim.states["sensor.humidity"].state).toBe("47");
+  sim.drift(() => 0.1);
+  expect(sim.states["sensor.temperature"].state).toBe("21.5");
+  expect(sim.states["sensor.energy"].state).toBe("3.2");
+  expect(sim.states["sensor.mystery"].state).toBe("12");
+  expect(sim.states["light.lamp"].state).toBe("on");
+});
+
+test("drift stays within five steps of where a sensor started", () => {
+  const { sim } = home(["sensor.temperature"]);
+  for (let i = 0; i < 20; i++) sim.drift(() => 0.9);
+  expect(sim.states["sensor.temperature"].state).toBe("21.9");
+  for (let i = 0; i < 20; i++) sim.drift(() => 0.1);
+  expect(sim.states["sensor.temperature"].state).toBe("21.1");
+});
+
+test("states read the way HA's frontend writes them", () => {
+  expect(formatState(guessEntity("sensor.temperature", NOW))).toBe("21.5 °C");
+  expect(formatState(guessEntity("binary_sensor.balcony_door", NOW))).toBe("Closed");
+  expect(formatState({ ...guessEntity("binary_sensor.hall_motion", NOW), state: "on" })).toBe("Detected");
+  expect(formatState({ ...guessEntity("binary_sensor.thing", NOW), state: "on" })).toBe("On");
+  expect(formatState(guessEntity("button.doorbell", NOW))).toBe("Never used");
+  expect(formatState(guessEntity("scene.movie", NOW))).toMatch(/^Last run /);
+  expect(formatState(guessEntity("cover.blind", NOW))).toBe("Closed");
+  expect(formatState({ ...guessEntity("media_player.tv", NOW), state: "playing" })).toBe("Playing");
+});
+
+test("default icons follow the domain, device class and state", () => {
+  expect(defaultIcon(guessEntity("light.lamp", NOW))).toBe("mdi:lightbulb");
+  expect(defaultIcon({ ...guessEntity("light.lamp", NOW), state: "off" })).toBe("mdi:lightbulb-outline");
+  expect(defaultIcon(guessEntity("binary_sensor.balcony_door", NOW))).toBe("mdi:door-closed");
+  expect(defaultIcon({ ...guessEntity("binary_sensor.balcony_door", NOW), state: "on" })).toBe("mdi:door-open");
+  expect(defaultIcon(guessEntity("cover.garage_door", NOW))).toBe("mdi:garage");
+  expect(defaultIcon(guessEntity("sensor.mystery", NOW))).toBe("mdi:eye");
+  expect(defaultIcon(guessEntity("vacuum.robbie", NOW))).toBe("mdi:robot-vacuum");
+  expect(defaultIcon(guessEntity("weather.home", NOW))).toBe("mdi:bookmark");
+});
+
+test("every icon the demo can pick exists in @mdi/js, which build.mjs packs them from", () => {
+  const missing = ICON_NAMES.filter((name) => !mdiPath(name));
+  expect(ICON_NAMES.length).toBeGreaterThan(30);
+  expect(missing).toEqual([]);
+});

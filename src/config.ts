@@ -1,20 +1,21 @@
 export type Vec3 = [number, number, number];
 
-export interface LightBinding {
-  entity: string;
-  anchor: Vec3;
-  radius: number;
-  soft_edge: number;
-  off_dim: number;
-  name?: string;
-  icon?: string;
-}
+/** A Home Assistant card action like { action: "navigate", navigation_path: "/lovelace/1" }, handled by HA itself. */
+export type ActionConfig = Record<string, unknown> & { action: string };
 
 export interface PinBinding {
   entity: string;
   anchor: Vec3;
   name?: string;
   icon?: string;
+  tap_action?: ActionConfig;
+  hold_action?: ActionConfig;
+}
+
+export interface LightBinding extends PinBinding {
+  radius: number;
+  soft_edge: number;
+  off_dim: number;
 }
 
 export interface CameraView {
@@ -51,15 +52,30 @@ export const LIGHT_DEFAULTS = { radius: 1.0, soft_edge: 0.5, off_dim: 0.45 };
 
 export const SPLAT_EXTENSIONS = ["spz", "ply", "splat", "ksplat", "sog", "rad"];
 
-const ENTITY_ID = /^[a-z0-9_]+\.[a-z0-9_]+$/;
+export const ENTITY_ID = /^[a-z0-9_]+\.[a-z0-9_]+$/;
 export const ICON = /^[\w-]+:[\w-]+$/;
 
 const TOP_KEYS = [
   "type", "splat", "up", "floor", "ceiling_cut", "aspect_ratio", "lod", "lod_scale", "camera", "lights", "pins",
   ...PASSTHROUGH,
 ];
-const LIGHT_KEYS = ["entity", "anchor", "radius", "soft_edge", "off_dim", "name", "icon"];
-const PIN_KEYS = ["entity", "anchor", "name", "icon"];
+const PIN_KEYS = ["entity", "anchor", "name", "icon", "tap_action", "hold_action"];
+const LIGHT_KEYS = [...PIN_KEYS, "radius", "soft_edge", "off_dim"];
+
+export interface BindingRef extends PinBinding {
+  kind: "light" | "pin";
+  index: number;
+}
+
+/** Lights then pins, the order the card draws them and the editor lists them in. */
+export function bindingRefs(config: RoomTwinConfig): BindingRef[] {
+  const ref =
+    (kind: "light" | "pin") =>
+    ({ entity, anchor, name, icon, tap_action, hold_action }: PinBinding, index: number): BindingRef => ({
+      kind, index, entity, anchor, name, icon, tap_action, hold_action,
+    });
+  return [...config.lights.map(ref("light")), ...config.pins.map(ref("pin"))];
+}
 
 export class ConfigError extends Error {
   constructor(message: string) {
@@ -147,9 +163,9 @@ export function aspectRatio(value: unknown): number {
   throw new ConfigError(`aspect_ratio must look like "16:9" or be a number from 0.1 to 10, got ${describe(value)}`);
 }
 
-/** The name and icon overrides both kinds of binding share. */
-function labels(value: Record<string, unknown>, path: string): { name?: string; icon?: string } {
-  const result: { name?: string; icon?: string } = {};
+/** The name, icon and action overrides both kinds of binding share. */
+function overrides(value: Record<string, unknown>, path: string): Omit<PinBinding, "entity" | "anchor"> {
+  const result: Omit<PinBinding, "entity" | "anchor"> = {};
   if (!unset(value.name)) {
     // An unquoted number in YAML, like a room number, is still meant as text.
     if (typeof value.name !== "string" && typeof value.name !== "number") {
@@ -162,6 +178,14 @@ function labels(value: Record<string, unknown>, path: string): { name?: string; 
       throw new ConfigError(`${path}.icon must be an icon like mdi:lamp, got ${describe(value.icon)}`);
     }
     result.icon = value.icon;
+  }
+  for (const key of ["tap_action", "hold_action"] as const) {
+    const action = value[key];
+    if (unset(action)) continue;
+    if (!isObject(action) || typeof action.action !== "string") {
+      throw new ConfigError(`${path}.${key} must be a card action like { action: more-info }, got ${describe(action)}`);
+    }
+    result[key] = action as ActionConfig;
   }
   return result;
 }
@@ -181,14 +205,14 @@ function light(value: unknown, i: number): LightBinding {
     radius: number(raw.radius, `${path}.radius`, { min: 0.01, fallback: LIGHT_DEFAULTS.radius }),
     soft_edge: number(raw.soft_edge, `${path}.soft_edge`, { min: 0, fallback: LIGHT_DEFAULTS.soft_edge }),
     off_dim: number(raw.off_dim, `${path}.off_dim`, { min: 0, max: 1, fallback: LIGHT_DEFAULTS.off_dim }),
-    ...labels(raw, path),
+    ...overrides(raw, path),
   };
 }
 
 function pin(value: unknown, i: number): PinBinding {
   const path = `pins[${i}]`;
   const { raw, entity, anchor } = binding(value, path, PIN_KEYS);
-  return { entity, anchor, ...labels(raw, path) };
+  return { entity, anchor, ...overrides(raw, path) };
 }
 
 /** Validates a raw card config and fills in defaults. Throws ConfigError with a message meant for the user. */
@@ -225,7 +249,8 @@ export function parseConfig(raw: unknown): RoomTwinConfig {
     pins: list(raw.pins, "pins").map(pin),
   };
 
-  if (!unset(raw.aspect_ratio)) {
+  // HA's visual editor leaves an emptied text field as "".
+  if (!unset(raw.aspect_ratio) && raw.aspect_ratio !== "") {
     aspectRatio(raw.aspect_ratio);
     config.aspect_ratio = raw.aspect_ratio as string | number;
   }

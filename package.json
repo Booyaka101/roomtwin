@@ -23,6 +23,9 @@
   ],
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20.11"
+  },
   "main": "dist/roomtwin-card.js",
   "files": [
     "dist/roomtwin-card.js"

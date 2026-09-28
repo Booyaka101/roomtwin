@@ -55,9 +55,9 @@ With [HACS](https://hacs.xyz):
 2. Add `https://github.com/Booyaka101/roomtwin` with type **Dashboard**.
 3. Open RoomTwin in HACS and download it. HACS registers the dashboard resource for you. Reload the browser.
 
-Manual install: download `roomtwin-card.js` from the [latest release](https://github.com/Booyaka101/roomtwin/releases/latest) and copy it to `/config/www/roomtwin-card.js`. Then under Settings, Dashboards, three-dot menu, Resources, add `/local/roomtwin-card.js?v=0.1.0` as a **JavaScript module**. The Resources entry only shows with Advanced mode turned on in your user profile. Bump the `?v=` part whenever you replace the file, or browsers keep the old one.
+Manual install: download `roomtwin-card.js` from the [latest release](https://github.com/Booyaka101/roomtwin/releases/latest) and copy it to `/config/www/roomtwin-card.js`. Then under Settings, Dashboards, three-dot menu, Resources, add `/local/roomtwin-card.js?v=0.1.0` as a **JavaScript module**. The Resources entry only shows with Advanced mode turned on in your user profile. Change the `?v=` part whenever you replace the file, or browsers keep the old one. Any value works, the version number is just easy to remember.
 
-If your dashboards are in YAML mode, add the resource to `configuration.yaml` instead:
+If your dashboards are in YAML mode, add the resource to `configuration.yaml` instead. With HACS the URL is `/hacsfiles/roomtwin/roomtwin-card.js`:
 
 ```yaml
 lovelace:
@@ -83,11 +83,13 @@ Admins see a pencil button in the corner. It opens edit mode, which works on the
 2. **Tap the room** where a lamp or device is. Type or pick an entity, then choose **Add as light** (lights and switches) or **Add as pin** (anything).
 3. For a light, set **Radius (m)**, **Soft edge (m)** and **Brightness when off** with the sliders while you watch the room. Flip the real light to check it. **Label** and **Icon** override the entity's name and icon on the pin, for lights and pins alike.
 4. Optionally turn on **Ceiling cut** so you can see into the room from above, and press **Use this view as default** once the camera is where you like it.
-5. Press **Copy YAML**, open the card's code editor, replace everything with the clipboard, and save.
+5. Press **Save**. The card writes its new config into the dashboard, leaving everything else on it as it was, and Home Assistant redraws the dashboard with it.
 
-Nothing is saved until step 5. The editor says so while you have unsaved changes, and **Discard changes** puts everything back.
+Nothing is saved until step 5. The editor says so while you have unsaved changes. **Undo** steps back one change at a time (a whole slider drag counts as one), and **Discard changes** puts everything back.
 
-The card's visual editor in the dashboard dialog covers the plain options: the splat file, aspect ratio, detail and ceiling cut height. Changing them there keeps your lights, pins and camera.
+Save needs a dashboard managed from the UI. A YAML-mode dashboard only changes in its file, so there the editor has **Copy YAML** instead: paste the result over the card's entry in the dashboard's YAML file. If a save fails for another reason, the editor says why, and **Copy YAML** into the card's code editor does the same job. Save is also hidden while the dashboard itself is in edit mode, where the card is only a preview. Home Assistant redraws the dashboard whenever anyone saves it, so changes you haven't saved yet are lost if someone saves the same dashboard from another tab.
+
+The card's visual editor in the dashboard dialog covers the plain options: the splat file, aspect ratio (pick a common one or type your own), detail and ceiling cut height. Changing them there keeps your lights, pins and camera.
 
 ## Using the card
 
@@ -95,13 +97,14 @@ The card's visual editor in the dashboard dialog covers the plain options: the s
 - Tapping a scene or script runs it, and tapping a button or input_button presses it.
 - Garage doors, gates and doors (covers with those device classes) open more-info on tap instead of moving, so brushing the pin can't open the garage.
 - **Long-press** any pin to open the more-info dialog. Tapping a sensor, an unavailable entity or anything else without a tap action opens more-info too.
+- A pin or light with its own `tap_action` or `hold_action` does that instead, using the same actions as Home Assistant's own cards: `more-info`, `toggle`, `navigate`, `url`, `perform-action`, `assist` or `none`, with `confirmation` if you want a prompt first. That also overrides the garage door rule above, so a `toggle` tap action on a garage door does move it.
 - From the keyboard, Tab to a pin, then Enter or Space taps it, and Shift+Enter or the menu key opens more-info. Screen readers hear the pin's name and state.
 - Sensor pins show the current state with its unit and update live.
 - A binary sensor pin turns red while it has something to look at: an open door, window or garage door, or smoke, gas, carbon monoxide, a leak, a safety problem or tampering.
 - A pin whose entity doesn't exist shows as a grey question mark, so a renamed entity is easy to spot.
 - Drag to look around and right-drag to pan. Scrolling over the card scrolls the dashboard as usual, so zoom by holding Ctrl while you scroll, or pinch. In edit mode the scroll wheel zooms on its own.
 - On a touch screen, swipe sideways to turn the view and pinch to zoom. An up or down swipe scrolls the dashboard.
-- A card doesn't download its room until it first scrolls into view, and cards that are off-screen or on a hidden tab stop rendering entirely. Several rooms on one dashboard only cost what you look at.
+- A card doesn't download its room until it first scrolls into view, and cards that are off-screen or on a hidden tab stop rendering entirely.
 
 ## Configuration reference
 
@@ -124,6 +127,9 @@ pins:
   - entity: sensor.living_room_temperature
     anchor: [-0.9, -1.1, 2.05]
     name: Temperature
+    tap_action:
+      action: navigate
+      navigation_path: /lovelace/climate
 ```
 
 | Option | Default | Meaning |
@@ -133,7 +139,7 @@ pins:
 | `floor` | `0` | Height of the floor along `up`, in capture coordinates. Written by the floor tool. |
 | `ceiling_cut` | off | Hides everything more than this far above the floor, so you can look down into the room. Taps go through the cut part. |
 | `camera` | middle of the room | Default view, `position` and `target` in capture coordinates. Written by **Use this view as default**. |
-| `aspect_ratio` | `16:9` | Card shape, as `"4:3"` or a number like `1.5`. Keep the quotes: YAML reads an unquoted 16:9 as the number 969, and the card says so. |
+| `aspect_ratio` | `16:9` | Card shape, as `"4:3"` or a number like `1.5`. In a YAML-mode dashboard keep the quotes, because Home Assistant reads an unquoted 16:9 there as the number 969. The card says so if that happens. |
 | `lod` | `true` | Spark's level of detail, which keeps large captures smooth. Leave it on unless a capture renders wrongly. |
 | `lod_scale` | `1` | How many splats level of detail may draw, from 0.1 to 8. Lower it for a slow tablet, raise it on a strong desktop GPU. |
 | `lights[].entity` | required | A `light` or `switch` entity. |
@@ -143,10 +149,12 @@ pins:
 | `lights[].off_dim` | `0.45` | How bright the region looks when the light is off, from 0 (black) to 1 (unchanged). |
 | `lights[].name` | entity name | Label shown on hover, read by screen readers and shown in the editor. |
 | `lights[].icon` | entity icon | Pin icon, like `mdi:lamp`. |
+| `lights[].tap_action`, `lights[].hold_action` | toggle, more-info | Any Home Assistant card action, as on the built-in cards. |
 | `pins[].entity` | required | Any entity. |
 | `pins[].anchor` | required | Where the pin sits, in capture coordinates. |
 | `pins[].name` | entity name | Label shown on hover, read by screen readers and shown in the editor. |
 | `pins[].icon` | entity icon | Pin icon, like `mdi:thermometer`. |
+| `pins[].tap_action`, `pins[].hold_action` | depends on the entity, more-info | Any Home Assistant card action, as on the built-in cards. |
 
 The card rejects options it doesn't know, so a typo like `raduis` is an error instead of being silently ignored. Home Assistant shows a bare "Configuration error" on the dashboard; the message naming the option shows once you edit the dashboard or open the card's editor.
 
@@ -198,7 +206,7 @@ The card uses Lit, three.js and [Spark](https://sparkjs.dev) 2.2.0, bundled by R
 
 `npm run demo -- --serve` builds the live demo, the card on a real room with a simulated home around it, and serves it at http://localhost:4173. It needs a scan and the card's YAML in `demo/`; [demo/README.md](demo/README.md) covers that and publishing it on GitHub Pages.
 
-To release, bump `version` in `package.json` and `src/version.ts` (a test keeps them equal), then publish a GitHub release tagged `v<version>`. The release workflow builds the card, attaches `roomtwin-card.js` to the release and runs the HACS check. HACS installs from the release asset.
+To release, bump `version` in `package.json` and `src/version.ts` (a test keeps them equal), add a `## <version>` section to `CHANGELOG.md`, commit, and push a tag `v<version>`. The release workflow tests and builds the card, creates the GitHub release with those notes and `roomtwin-card.js` attached, then runs the HACS check. HACS installs from the release asset.
 
 ## License
 

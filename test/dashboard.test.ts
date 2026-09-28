@@ -1,0 +1,132 @@
+import { describe, expect, test } from "vitest";
+import { SaveError, canSave, dashboardUrlPath, findCard, replaceAt, saveCard } from "../src/dashboard";
+import type { HomeAssistant } from "../src/hass";
+
+const card = { type: "custom:roomtwin-card", splat: "/local/roomtwin/living.spz", pins: [{ entity: "sensor.t", anchor: [0, 1, 0] }] };
+const next = { ...card, ceiling_cut: 2.3 };
+
+const sections = {
+  views: [
+    { title: "Home", cards: [{ type: "markdown", content: "hi" }] },
+    {
+      type: "sections",
+      sections: [{ type: "grid", cards: [{ type: "heading", heading: "Living" }, card] }],
+    },
+  ],
+};
+
+/** A Home Assistant whose websocket serves `dashboard` and records what gets saved. */
+function fakeHass(dashboard: unknown, fail: { read?: unknown; save?: unknown } = {}) {
+  const calls: Record<string, unknown>[] = [];
+  const hass = {
+    states: {},
+    callService: async () => undefined,
+    callWS: async (message: Record<string, unknown>) => {
+      calls.push(message);
+      if (message.type === "lovelace/config") {
+        if (fail.read) throw fail.read;
+        return dashboard;
+      }
+      if (fail.save) throw fail.save;
+      return null;
+    },
+  } as unknown as HomeAssistant;
+  return { hass, calls };
+}
+
+async function saveError(dashboard: unknown, fail = {}): Promise<string> {
+  try {
+    await saveCard(fakeHass(dashboard, fail).hass, null, card, next);
+  } catch (err) {
+    expect(err).toBeInstanceOf(SaveError);
+    return (err as Error).message;
+  }
+  throw new Error("expected saveCard to throw");
+}
+
+describe("findCard", () => {
+  test("finds a card inside a sections view", () => {
+    expect(findCard(sections, card)).toEqual([["views", 1, "sections", 0, "cards", 1]]);
+  });
+
+  test("finds a card inside a stack in a masonry view", () => {
+    const dashboard = { views: [{ cards: [{ type: "vertical-stack", cards: [{ type: "entities", entities: [] }, card] }] }] };
+    expect(findCard(dashboard, card)).toEqual([["views", 0, "cards", 0, "cards", 1]]);
+  });
+
+  test("key order doesn't matter, but every value does", () => {
+    const reordered = { pins: card.pins, splat: card.splat, type: card.type };
+    expect(findCard({ views: [{ cards: [reordered] }] }, card)).toHaveLength(1);
+    expect(findCard({ views: [{ cards: [{ ...card, floor: 0.1 }] }] }, card)).toEqual([]);
+  });
+
+  test("reports every copy of an identical card", () => {
+    expect(findCard({ views: [{ cards: [card, card] }] }, card)).toHaveLength(2);
+  });
+});
+
+test("replaceAt swaps one value and leaves the original alone", () => {
+  const path = findCard(sections, card)[0];
+  const replaced = replaceAt(sections, path, next) as typeof sections;
+  expect(findCard(replaced, next)).toEqual([path]);
+  expect(findCard(sections, card)).toEqual([path]);
+  expect(replaced.views[0]).toBe(sections.views[0]);
+});
+
+test("dashboardUrlPath", () => {
+  expect(dashboardUrlPath("/lovelace/0")).toBeNull();
+  expect(dashboardUrlPath("/lovelace")).toBeNull();
+  expect(dashboardUrlPath("/")).toBeNull();
+  expect(dashboardUrlPath("/room-twin/living")).toBe("room-twin");
+  expect(dashboardUrlPath("/dashboard-home/0")).toBe("dashboard-home");
+});
+
+test("only admins on a dashboard managed from the UI can save", () => {
+  const admin = { ...fakeHass(sections).hass, user: { is_admin: true } } as HomeAssistant;
+  const panels = { lovelace: { config: null }, "room-twin": { config: { mode: "storage" } }, "yaml-room": { config: { mode: "yaml" } } };
+  expect(canSave({ ...admin, panels }, null)).toBe(true);
+  expect(canSave({ ...admin, panels }, "room-twin")).toBe(true);
+  expect(canSave({ ...admin, panels }, "yaml-room")).toBe(false);
+  expect(canSave({ ...admin, panels: { lovelace: { config: { mode: "yaml" } } } }, null)).toBe(false);
+  expect(canSave({ ...admin, user: { is_admin: false } }, null)).toBe(false);
+  expect(canSave({ ...admin, callWS: undefined }, null)).toBe(false);
+});
+
+describe("saveCard", () => {
+  test("saves the whole dashboard with only this card changed", async () => {
+    const { hass, calls } = fakeHass(sections);
+    await saveCard(hass, "room-twin", card, next);
+    expect(calls[0]).toEqual({ type: "lovelace/config", url_path: "room-twin" });
+    expect(calls[1].type).toBe("lovelace/config/save");
+    expect(calls[1].url_path).toBe("room-twin");
+    expect(calls[1].config).toEqual(replaceAt(sections, ["views", 1, "sections", 0, "cards", 1], next));
+  });
+
+  test("a YAML-mode dashboard can't be read, and the message passes on why", async () => {
+    const message = await saveError(sections, { read: { code: "config_not_found", message: "No config found." } });
+    expect(message).toBe("Couldn't read the dashboard: No config found.");
+  });
+
+  test("a dashboard Home Assistant generates has no card to change", async () => {
+    expect(await saveError({ strategy: { type: "original-states" } })).toMatch(/generated by Home Assistant/);
+  });
+
+  test("a card changed in another tab isn't overwritten", async () => {
+    const changed = { views: [{ cards: [{ ...card, floor: 0.2 }] }] };
+    expect(await saveError(changed)).toMatch(/^Couldn't find this card in the saved dashboard/);
+  });
+
+  test("two identical cards are left alone", async () => {
+    expect(await saveError({ views: [{ cards: [card, card] }] })).toMatch(/more than one card with exactly this config/);
+  });
+
+  test("a rejected save says so", async () => {
+    const message = await saveError(sections, { save: { code: "unauthorized", message: "Unauthorized" } });
+    expect(message).toBe("Home Assistant didn't save the dashboard: Unauthorized.");
+  });
+
+  test("a Home Assistant without a websocket can't save", async () => {
+    const hass = { states: {}, callService: async () => undefined } as HomeAssistant;
+    await expect(saveCard(hass, null, card, next)).rejects.toBeInstanceOf(SaveError);
+  });
+});

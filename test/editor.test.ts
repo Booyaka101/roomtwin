@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { parse } from "yaml";
 import { parseConfig, type Vec3 } from "../src/config";
-import { CollinearError, floorFromPoints, roomRanges, toYaml } from "../src/editor";
+import { CollinearError, floorFromPoints, roomRanges, toCardConfig, toYaml } from "../src/editor";
 
 describe("floorFromPoints", () => {
   test("a level floor gives +Y up and its height", () => {
@@ -60,6 +60,12 @@ describe("toYaml", () => {
       { entity: "binary_sensor.door", anchor: [0, 0, 0], name: "Door: front # main" },
       { entity: "sensor.yes", anchor: [0, 0, 0], name: "yes" },
       { entity: "sensor.quote", anchor: [0, 0, 0], name: 'Say "hi"\nthere' },
+      {
+        entity: "cover.garage",
+        anchor: [2, 0, 1],
+        tap_action: { action: "navigate", navigation_path: "/lovelace/garage" },
+        hold_action: { action: "perform-action", perform_action: "cover.toggle", target: { entity_id: "cover.garage" }, confirmation: true },
+      },
     ],
     grid_options: { columns: "full" },
     visibility: [{ condition: "screen", media_query: "(min-width: 600px)" }],
@@ -76,6 +82,14 @@ describe("toYaml", () => {
     const yaml = toYaml(config);
     expect(yaml).toBe("type: custom:roomtwin-card\nsplat: /local/roomtwin/living.spz\nup: [0, -1, 0]\n");
     expect(parseConfig(parse(yaml))).toEqual(config);
+  });
+
+  test("the stored card config leaves defaults and cleared options out", () => {
+    const config = parseConfig({ ...full, floor: 0, lod: true, lod_scale: 1, lights: [], pins: [{ entity: "sensor.t", anchor: [0, 0, 0] }] });
+    config.pins[0].name = undefined;
+    const card = toCardConfig(config);
+    expect(Object.keys(card)).toEqual(["type", "splat", "up", "ceiling_cut", "aspect_ratio", "camera", "pins", "grid_options", "visibility", "card_mod"]);
+    expect(card.pins).toEqual([{ entity: "sensor.t", anchor: [0, 0, 0] }]);
   });
 
   test("writes anchors as flow lists and lights as a block list", () => {

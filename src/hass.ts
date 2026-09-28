@@ -16,7 +16,16 @@ export interface HassEntity {
 export interface HomeAssistant {
   states: Record<string, HassEntity>;
   user?: { is_admin: boolean };
-  callService(domain: string, service: string, data?: Record<string, unknown>): Promise<unknown>;
+  locale?: unknown;
+  panels?: Record<string, { config?: { mode?: string } | null }>;
+  callService(
+    domain: string,
+    service: string,
+    data?: Record<string, unknown>,
+    target?: Record<string, unknown>,
+    notifyOnError?: boolean,
+  ): Promise<unknown>;
+  callWS?<T>(message: Record<string, unknown>): Promise<T>;
   formatEntityState?(stateObj: HassEntity): string;
 }
 

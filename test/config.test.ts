@@ -131,6 +131,23 @@ describe("parseConfig", () => {
     expect(config.pins[0]).toEqual({ entity: "sensor.t", anchor: [0, 0, 1], name: "21", icon: "local:ceiling_fan" });
   });
 
+  test("lights and pins take Home Assistant tap and hold actions", () => {
+    const tap = { action: "navigate", navigation_path: "/lovelace/garage" };
+    const hold = { action: "perform-action", perform_action: "cover.open_cover", confirmation: { text: "Open?" } };
+    const config = parseConfig({ ...base, pins: [{ entity: "cover.garage", anchor: [0, 0, 0], tap_action: tap, hold_action: hold }] });
+    expect(config.pins[0]).toMatchObject({ tap_action: tap, hold_action: hold });
+    expect(error({ ...base, pins: [{ entity: "cover.garage", anchor: [0, 0, 0], tap_action: "toggle" }] })).toBe(
+      'pins[0].tap_action must be a card action like { action: more-info }, got "toggle"',
+    );
+    expect(error({ ...base, lights: [{ entity: "light.a", anchor: [0, 0, 0], hold_action: { navigation_path: "/" } }] })).toMatch(
+      /^lights\[0\]\.hold_action must be a card action/,
+    );
+  });
+
+  test("an aspect ratio emptied in the visual editor counts as unset", () => {
+    expect(parseConfig({ ...base, aspect_ratio: "" }).aspect_ratio).toBeUndefined();
+  });
+
   test("layout keys from older dashboards are kept", () => {
     const config = parseConfig({ ...base, view_layout: { position: "main" }, layout_options: { grid_columns: 4 } });
     expect(config.view_layout).toEqual({ position: "main" });

@@ -17,6 +17,8 @@ const BINARY_CLASSES = [...OPENINGS, "motion", "occupancy", "moisture", "smoke"]
 // Words in an entity id that name a sensor's device class without the usual spelling.
 const CLASS_ALIASES: Record<string, string> = { temp: "temperature", lux: "illuminance", co2: "carbon_dioxide" };
 const TOGGLES = new Set(["light", "switch", "fan", "input_boolean"]);
+// HA clears these while a light is off and brings them back when it turns on again.
+const OFF_LOOK = { brightness: null, rgb_color: null, color_mode: null };
 
 const BINARY_TEXT: Record<string, [string, string]> = {
   door: ["Open", "Closed"],
@@ -95,8 +97,10 @@ export function formatState(stateObj: HassEntity): string {
  */
 export class SimHome {
   states: Record<string, HassEntity> = {};
-  private readonly timers = new Set<ReturnType<typeof setTimeout>>();
+  // One pending transition per entity, so a newer command replaces an older one.
+  private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly driftStart: Record<string, number> = {};
+  private readonly lastLook: Record<string, Record<string, unknown>> = {};
 
   constructor(
     entityIds: string[],
@@ -106,11 +110,12 @@ export class SimHome {
     for (const id of new Set([...entityIds, ...Object.keys(overrides)])) {
       const guess = guessEntity(id);
       const extra = overrides[id] ?? {};
-      this.states[id] = {
+      const stateObj = (this.states[id] = {
         ...guess,
         state: extra.state ?? guess.state,
         attributes: { ...guess.attributes, ...extra.attributes },
-      };
+      });
+      if (domainOf(id) === "light" && stateObj.state === "off") this.dim(stateObj);
     }
   }
 
@@ -125,8 +130,12 @@ export class SimHome {
 
   /** Changes one entity and tells the page. Untouched entities keep their object, as they do in HA. */
   set(entityId: string, state: string, attributes: Record<string, unknown> = {}): void {
+    if (this.write(entityId, state, attributes)) this.onChange(this.hass);
+  }
+
+  private write(entityId: string, state: string, attributes: Record<string, unknown> = {}): boolean {
     const old = this.states[entityId];
-    if (!old) return;
+    if (!old) return false;
     const now = new Date().toISOString();
     this.states = {
       ...this.states,
@@ -138,7 +147,15 @@ export class SimHome {
         last_updated: now,
       },
     };
-    this.onChange(this.hass);
+    return true;
+  }
+
+  /** Remembers how a light looked and returns the attributes that clear it, as turning it off does in HA. */
+  private dim(stateObj: HassEntity): typeof OFF_LOOK {
+    const { brightness, rgb_color, color_mode } = stateObj.attributes;
+    this.lastLook[stateObj.entity_id] = { brightness, rgb_color, color_mode };
+    Object.assign(stateObj.attributes, OFF_LOOK);
+    return OFF_LOOK;
   }
 
   async callService(domain: string, service: string, data: Record<string, unknown> = {}): Promise<void> {
@@ -149,19 +166,27 @@ export class SimHome {
     const { entity_id: _, ...attrs } = data;
     if (TOGGLES.has(domain) && ["toggle", "turn_on", "turn_off"].includes(service)) {
       const next = service === "toggle" ? !on : service === "turn_on";
-      if (domain === "light" && next && !on && attrs.brightness === undefined) attrs.brightness = stateObj.attributes.brightness || 255;
       if (attrs.rgb_color) attrs.color_mode = "hs";
       if (attrs.color_temp_kelvin) attrs.color_mode = "color_temp";
+      if (domain === "light" && next && !on) Object.assign(attrs, { brightness: 255, ...this.lastLook[id], ...attrs });
+      if (domain === "light" && !next && on) Object.assign(attrs, this.dim({ ...stateObj, attributes: { ...stateObj.attributes } }));
       this.set(id, next ? "on" : "off", attrs);
-    } else if (domain === "cover" && ["toggle", "open_cover", "close_cover"].includes(service)) {
+    } else if (domain === "cover" && ["toggle", "open_cover", "close_cover", "stop_cover"].includes(service)) {
+      const moving = stateObj.state === "opening" || stateObj.state === "closing";
+      if (service === "stop_cover" || (service === "toggle" && moving)) {
+        // A cover stopped part way reports open, as it does in HA.
+        this.cancel(id);
+        this.set(id, "open");
+        return;
+      }
       const open = service === "toggle" ? stateObj.state !== "open" : service === "open_cover";
       this.set(id, open ? "opening" : "closing");
-      this.later(1500, () => this.set(id, open ? "open" : "closed"));
+      this.later(id, 1500, () => this.set(id, open ? "open" : "closed"));
     } else if ((domain === "scene" && service === "turn_on") || service === "press") {
       this.set(id, new Date().toISOString());
     } else if (domain === "script" && service === "turn_on") {
       this.set(id, "on");
-      this.later(1000, () => this.set(id, "off"));
+      this.later(id, 1000, () => this.set(id, "off"));
     } else if (domain === "lock" && (service === "lock" || service === "unlock")) {
       this.set(id, service === "lock" ? "locked" : "unlocked");
     } else {
@@ -171,6 +196,7 @@ export class SimHome {
 
   /** Nudges numeric sensors a little, so readings on the pins visibly update the way live ones do. */
   drift(random = Math.random): void {
+    let changed = false;
     for (const stateObj of Object.values(this.states)) {
       const step = SENSOR_CLASSES[String(stateObj.attributes.device_class)]?.step;
       const value = Number(stateObj.state);
@@ -180,20 +206,29 @@ export class SimHome {
       // A page left open for an hour should still show a believable room, so wander no more than five steps.
       const away = (value - start) / step;
       const up = away <= -4.5 || (away < 4.5 && random() >= 0.5);
-      this.set(stateObj.entity_id, (value + (up ? step : -step)).toFixed(decimals));
+      changed = this.write(stateObj.entity_id, (value + (up ? step : -step)).toFixed(decimals)) || changed;
     }
+    if (changed) this.onChange(this.hass);
   }
 
   dispose(): void {
-    for (const timer of this.timers) clearTimeout(timer);
+    for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
   }
 
-  private later(ms: number, fn: () => void): void {
-    const timer = setTimeout(() => {
-      this.timers.delete(timer);
-      fn();
-    }, ms);
-    this.timers.add(timer);
+  private later(entityId: string, ms: number, fn: () => void): void {
+    this.cancel(entityId);
+    this.timers.set(
+      entityId,
+      setTimeout(() => {
+        this.timers.delete(entityId);
+        fn();
+      }, ms),
+    );
+  }
+
+  private cancel(entityId: string): void {
+    clearTimeout(this.timers.get(entityId));
+    this.timers.delete(entityId);
   }
 }

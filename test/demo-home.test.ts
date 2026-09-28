@@ -38,7 +38,7 @@ test("overrides replace the guessed state and add attributes, and add entities t
     "light.lamp": { state: "off", attributes: { friendly_name: "Reading lamp" } },
     "sensor.outside": { state: "9", attributes: { unit_of_measurement: "°C" } },
   });
-  expect(sim.states["light.lamp"]).toMatchObject({ state: "off", attributes: { friendly_name: "Reading lamp", brightness: 255 } });
+  expect(sim.states["light.lamp"]).toMatchObject({ state: "off", attributes: { friendly_name: "Reading lamp", brightness: null } });
   expect(sim.states["sensor.outside"].state).toBe("9");
 });
 
@@ -56,12 +56,15 @@ test("toggling a light hands the card a new hass with only that entity replaced"
   expect(sim.states["light.lamp"].attributes.color_mode).toBe("color_temp");
 });
 
-test("a light turned back on keeps its brightness", async () => {
-  const { sim } = home(["light.lamp"]);
-  await sim.callService("light", "turn_on", { entity_id: "light.lamp", brightness: 40 });
+test("a light off has no brightness or colour, and turned back on looks as it did", async () => {
+  const { sim } = home(["light.lamp", "light.shelf"], { "light.shelf": { state: "off" } });
+  await sim.callService("light", "turn_on", { entity_id: "light.lamp", brightness: 40, rgb_color: [255, 0, 0] });
   await sim.callService("light", "turn_off", { entity_id: "light.lamp" });
+  expect(sim.states["light.lamp"].attributes).toMatchObject({ brightness: null, rgb_color: null, color_mode: null });
   await sim.callService("light", "toggle", { entity_id: "light.lamp" });
-  expect(sim.states["light.lamp"]).toMatchObject({ state: "on", attributes: { brightness: 40 } });
+  expect(sim.states["light.lamp"]).toMatchObject({ state: "on", attributes: { brightness: 40, rgb_color: [255, 0, 0], color_mode: "hs" } });
+  await sim.callService("light", "turn_on", { entity_id: "light.shelf" });
+  expect(sim.states["light.shelf"].attributes).toMatchObject({ brightness: 255, color_mode: "hs" });
 });
 
 test("covers pass through opening and closing, scripts run and stop", async () => {
@@ -78,6 +81,22 @@ test("covers pass through opening and closing, scripts run and stop", async () =
   vi.advanceTimersByTime(1500);
   expect(sim.states["cover.blind"].state).toBe("closed");
   expect(sim.states["script.bedtime"].state).toBe("off");
+});
+
+test("a tap on a moving cover stops it, and a newer command replaces the pending one", async () => {
+  vi.useFakeTimers();
+  const { sim } = home(["cover.blind", "cover.shutter"]);
+  await sim.callService("cover", "open_cover", { entity_id: "cover.blind" });
+  await sim.callService("cover", "toggle", { entity_id: "cover.blind" });
+  expect(sim.states["cover.blind"].state).toBe("open");
+  await sim.callService("cover", "open_cover", { entity_id: "cover.shutter" });
+  vi.advanceTimersByTime(1000);
+  await sim.callService("cover", "close_cover", { entity_id: "cover.shutter" });
+  vi.advanceTimersByTime(1000);
+  expect(sim.states["cover.shutter"].state).toBe("closing");
+  vi.advanceTimersByTime(500);
+  expect(sim.states["cover.shutter"].state).toBe("closed");
+  expect(sim.states["cover.blind"].state).toBe("open");
 });
 
 test("dispose cancels pending transitions", async () => {
@@ -130,6 +149,13 @@ test("drift moves numeric sensors by one step and leaves the rest alone", () => 
   expect(sim.states["sensor.energy"].state).toBe("3.2");
   expect(sim.states["sensor.mystery"].state).toBe("12");
   expect(sim.states["light.lamp"].state).toBe("on");
+});
+
+test("drift hands the card one new hass for all the sensors it moved", () => {
+  const { sim, seen } = home(["sensor.temperature", "sensor.humidity", "light.lamp"]);
+  sim.drift(() => 0.9);
+  expect(seen).toHaveLength(1);
+  expect(seen[0].states["sensor.humidity"].state).toBe("47");
 });
 
 test("drift stays within five steps of where a sensor started", () => {

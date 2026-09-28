@@ -20,9 +20,13 @@ describe("lightColor", () => {
 
   test("half brightness with a warm colour", () => {
     const color = lightColor(entity("light.lamp", "on", { brightness: 128, rgb_color: [255, 180, 120] }), 0.45);
-    expectRgb(color, [0.72608, 0.51253, 0.34168]);
+    expectRgb(color, [0.72608, 0.56592, 0.43779]);
     const hs = { brightness: 128, rgb_color: [255, 180, 120] as Rgb, color_mode: "hs" };
-    expectRgb(lightColor(entity("light.lamp", "on", hs), 0.45), [0.72608, 0.51253, 0.34168]);
+    expectRgb(lightColor(entity("light.lamp", "on", hs), 0.45), [0.72608, 0.56592, 0.43779]);
+  });
+
+  test("a saturated colour tints the room without blacking out the other channels", () => {
+    expectRgb(lightColor(entity("light.lamp", "on", { brightness: 255, rgb_color: [255, 0, 0], color_mode: "hs" }), 0.45), [1, 0.25, 0.25]);
   });
 
   test("a white bulb in color_temp mode is not tinted by the rgb_color HA derives for it", () => {

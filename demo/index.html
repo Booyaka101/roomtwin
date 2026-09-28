@@ -56,7 +56,8 @@
       .slider { display: grid; gap: 6px; width: 100%; font-size: 0.85rem; color: var(--secondary-text-color); }
       .slider input { width: 100%; accent-color: var(--state-light-active-color); }
       .swatches { display: flex; gap: 10px; }
-      .swatches button { width: 32px; height: 32px; padding: 0; border-radius: 50%; border: 2px solid var(--divider-color); }
+      .swatches button { width: 44px; height: 44px; padding: 0; border-radius: 50%; border: 2px solid var(--divider-color); }
+      .swatches button[aria-pressed="true"] { border-color: var(--primary-text-color); }
       #toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 120px); background: #323232; color: #fff; padding: 12px 18px; border-radius: 6px; max-width: calc(100vw - 48px); transition: transform 0.2s; font-size: 0.9rem; }
       #toast.shown { transform: translate(-50%, 0); }
       @media (max-width: 860px) {

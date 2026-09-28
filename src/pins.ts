@@ -1,13 +1,5 @@
 import * as THREE from "three";
-import type { Vec3 } from "./config";
 import { domainOf, type HassEntity, type HomeAssistant } from "./hass";
-
-export interface Pin {
-  entity: string;
-  anchor: Vec3;
-  name?: string;
-  light: boolean;
-}
 
 export interface ScreenPoint {
   x: number;
@@ -40,9 +32,14 @@ const TIMESTAMP_STATES = new Set(["scene", "button", "input_button"]);
 // Opening one of these by brushing a pin is worse than the extra tap through more-info.
 const GUARDED_COVERS = new Set(["garage", "gate", "door"]);
 
+// Scenes and buttons sit at unknown until first used, and still work.
+function notReady(stateObj: HassEntity): boolean {
+  return stateObj.state === "unavailable" || (stateObj.state === "unknown" && !PRESS_SERVICES.has(domainOf(stateObj.entity_id)));
+}
+
 /** Service a tap calls for this entity, or null when a tap should open more-info instead. */
 export function tapService(stateObj: HassEntity | undefined): { domain: string; service: string } | null {
-  if (!stateObj || stateObj.state === "unavailable") return null;
+  if (!stateObj || notReady(stateObj)) return null;
   const domain = domainOf(stateObj.entity_id);
   if (domain === "cover" && GUARDED_COVERS.has(String(stateObj.attributes.device_class))) return null;
   if (TOGGLE_DOMAINS.has(domain)) return { domain, service: "toggle" };
@@ -75,7 +72,7 @@ const ALERT_CLASSES = new Set([
 
 export function pinState(stateObj: HassEntity | undefined): "missing" | "unavailable" | "alert" | "active" | "idle" {
   if (!stateObj) return "missing";
-  if (stateObj.state === "unavailable") return "unavailable";
+  if (notReady(stateObj)) return "unavailable";
   const alert = stateObj.state === "on" && domainOf(stateObj.entity_id) === "binary_sensor";
   if (alert && ALERT_CLASSES.has(String(stateObj.attributes.device_class))) return "alert";
   return ACTIVE_STATES.has(stateObj.state) ? "active" : "idle";

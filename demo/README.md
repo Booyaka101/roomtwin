@@ -38,6 +38,6 @@ That builds the card and the page into `site/` and serves it at http://localhost
 
 1. In the repo's **Settings > Pages**, set **Source** to **GitHub Actions**.
 2. Commit `demo/room.spz` and `demo/room.yaml` (and `demo/states.yaml` if you made one) and push to `main`.
-3. The **Demo** workflow builds the page and deploys it to `https://<your user>.github.io/roomtwin/`. It runs again whenever the card or the demo changes, and it skips itself while `demo/room.yaml` is missing, so forks without a scan don't fail.
+3. The **Demo** workflow builds the page and deploys it to `https://<your user>.github.io/roomtwin/`. It runs again whenever the card or the demo changes, and it skips itself while `demo/room.yaml` is missing. Forks build the page but don't deploy it.
 
 Then add the link near the top of the main README, for example `**[Try the live demo](https://<your user>.github.io/roomtwin/)**`.

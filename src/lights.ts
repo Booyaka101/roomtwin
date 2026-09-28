@@ -7,6 +7,9 @@ export type Rgb = [number, number, number];
 
 // HA also reports rgb_color for a white bulb in color_temp mode, but the capture already shows that warmth.
 const COLOR_MODES = new Set(["hs", "xy", "rgb", "rgbw", "rgbww"]);
+// How far a colour pulls the other channels down. At 1 a pure red bulb would black out everything that isn't red,
+// where a real one leaves the room lit by daylight and other lamps, just redder.
+const TINT = 0.75;
 
 function validRgb(value: unknown): value is Rgb {
   return (
@@ -20,7 +23,7 @@ function validRgb(value: unknown): value is Rgb {
 /**
  * Multiplier applied to the splats around a light. Anything but "on" (off, unavailable,
  * a missing entity) dims to off_dim; "on" scales from off_dim up to 1 with brightness and,
- * in a colour mode, takes its hue from rgb_color normalised so the brightest channel is 1.
+ * in a colour mode, takes most of its hue from rgb_color normalised so the brightest channel is 1.
  */
 export function lightColor(state: HassEntity | undefined, offDim: number): Rgb {
   if (!state || state.state !== "on") return [offDim, offDim, offDim];
@@ -31,7 +34,8 @@ export function lightColor(state: HassEntity | undefined, offDim: number): Rgb {
   const mode = state.attributes.color_mode;
   if (!validRgb(rgb) || (typeof mode === "string" && !COLOR_MODES.has(mode))) return [f, f, f];
   const max = Math.max(...rgb);
-  return [(f * rgb[0]) / max, (f * rgb[1]) / max, (f * rgb[2]) / max];
+  const tint = (c: number) => f * (1 - TINT * (1 - c / max));
+  return [tint(rgb[0]), tint(rgb[1]), tint(rgb[2])];
 }
 
 interface LightEdit {

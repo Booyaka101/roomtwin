@@ -1,7 +1,8 @@
 import { LitElement, css, html, nothing, type PropertyValues } from "lit";
 import * as THREE from "three";
-import { aspectRatio, parseConfig, type RoomTwinConfig, type Vec3 } from "./config";
-import { toYaml, type HelperDetail, type RoomTwinEditor } from "./editor";
+import { aspectRatio, bindingRefs, parseConfig, type BindingRef, type RoomTwinConfig } from "./config";
+import { canSave, dashboardUrlPath, saveCard } from "./dashboard";
+import { toCardConfig, toYaml, type HelperDetail, type RoomTwinEditor } from "./editor";
 import type { HassEntity, HomeAssistant } from "./hass";
 import { LightRig } from "./lights";
 import { PressGesture, pinLabel, pinState, projectToScreen, spokenState, tapService } from "./pins";
@@ -10,6 +11,10 @@ import { VERSION } from "./version";
 
 // Long enough to flip between dashboard views without re-downloading the splat.
 const DISPOSE_AFTER_MS = 60_000;
+// HA's card editor makes a new preview card each time it opens, and browsers cap live WebGL contexts at a handful.
+const PREVIEW_DISPOSE_AFTER_MS = 3_000;
+// The card editor calls setConfig on every keystroke in the splat path.
+const PREVIEW_LOAD_DELAY_MS = 600;
 // A browser that keeps dropping the 3D view gets the Try again button instead of a reload loop.
 const AUTO_RELOAD_GAP_MS = 60_000;
 const TAP_SLOP_PX = 6;
@@ -23,26 +28,11 @@ const MDI_HELP = "M11,18H13V16H11V18M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,
 const NO_WEBGL2 =
   "RoomTwin needs WebGL2, which this browser or device doesn't provide. Use a current Chrome, Edge, Firefox or Safari with hardware acceleration turned on.";
 
-interface StagePin {
-  kind: "light" | "pin";
-  index: number;
-  entity: string;
-  anchor: Vec3;
-  name?: string;
-  icon?: string;
-}
-
 type Status = { kind: "loading"; progress: number } | { kind: "ready" } | { kind: "error"; message: string; retry: boolean };
-
-function stagePins(config: RoomTwinConfig): StagePin[] {
-  return [
-    ...config.lights.map(({ entity, anchor, name, icon }, index) => ({ kind: "light" as const, index, entity, anchor, name, icon })),
-    ...config.pins.map(({ entity, anchor, name, icon }, index) => ({ kind: "pin" as const, index, entity, anchor, name, icon })),
-  ];
-}
 
 export class RoomTwinCard extends LitElement {
   static properties = {
+    preview: { attribute: false },
     _config: { state: true },
     _draft: { state: true },
     _editing: { state: true },
@@ -51,8 +41,16 @@ export class RoomTwinCard extends LitElement {
     _hint: { state: true },
   };
 
+  /** Set by HA in dashboard edit mode and in the card editor, where HA owns the config being edited. */
+  preview = false;
   private _hass?: HomeAssistant;
   private _config?: RoomTwinConfig;
+  // The config as the dashboard stores it, to find this card again when saving.
+  private rawConfig?: Record<string, unknown>;
+  private dirtyMemo?: { draft: RoomTwinConfig; config: RoomTwinConfig; dirty: boolean };
+  private loadTimer?: ReturnType<typeof setTimeout>;
+  // Home Assistant builds new cards after the dashboard is saved, so this one won't come back.
+  private replaced = false;
   private _draft: RoomTwinConfig | null = null;
   private _editing = false;
   private _status: Status = { kind: "loading", progress: 0 };
@@ -69,7 +67,7 @@ export class RoomTwinCard extends LitElement {
   private intersection?: IntersectionObserver;
   private resize?: ResizeObserver;
   private pinEls: HTMLElement[] = [];
-  private pins: StagePin[] = [];
+  private pins: BindingRef[] = [];
   private pressed = -1;
   private pinPointer?: PointerEvent;
   private lastAutoReload = 0;
@@ -77,7 +75,7 @@ export class RoomTwinCard extends LitElement {
   private readonly tmp = new THREE.Vector3();
   private readonly press = new PressGesture(
     () => this.pinTap(this.pins[this.pressed]),
-    () => this.moreInfo(this.pins[this.pressed]?.entity),
+    () => this.pinHold(this.pins[this.pressed]),
   );
 
   static getStubConfig(): Record<string, unknown> {
@@ -94,7 +92,7 @@ export class RoomTwinCard extends LitElement {
     };
     const helpers: Record<string, string> = {
       splat: "Like /local/roomtwin/living.spz, for a file in /config/www/roomtwin/",
-      aspect_ratio: "Like 16:9 or 4:3",
+      aspect_ratio: "Pick one or type your own, like 5:4",
       lod_scale: "Lower is faster on weak tablets, higher is sharper. 1 by default",
       ceiling_cut: "Hides everything above this height, to look in from above. Easier to set with the pencil button on the card",
     };
@@ -105,7 +103,10 @@ export class RoomTwinCard extends LitElement {
           type: "grid",
           name: "",
           schema: [
-            { name: "aspect_ratio", selector: { text: {} } },
+            {
+              name: "aspect_ratio",
+              selector: { select: { mode: "dropdown", custom_value: true, options: ["16:9", "4:3", "3:2", "1:1", "21:9", "3:4"] } },
+            },
             { name: "lod_scale", selector: { number: { min: 0.1, max: 8, step: 0.1, mode: "box" } } },
           ],
         },
@@ -119,6 +120,7 @@ export class RoomTwinCard extends LitElement {
   setConfig(raw: unknown): void {
     const old = this._config;
     this._config = parseConfig(raw);
+    this.rawConfig = raw as Record<string, unknown>;
     this._draft = null;
     this._editing = false;
     this.scene?.showHelper(null);
@@ -133,8 +135,10 @@ export class RoomTwinCard extends LitElement {
     this._hass = hass;
     const config = this.shown;
     if (!config) return;
-    // The editor looks up any entity, not just the bound ones.
-    if (!old || this._editing || stagePins(config).some((p) => old.states[p.entity] !== hass.states[p.entity])) {
+    // The editor looks up any entity, not just the bound ones. A new locale changes how every pin reads.
+    const changed =
+      !old || this._editing || old.locale !== hass.locale || bindingRefs(config).some((p) => old.states[p.entity] !== hass.states[p.entity]);
+    if (changed) {
       if (this.lights?.applyStates(hass.states)) this.scene?.requestRender();
       this.requestUpdate();
     }
@@ -186,9 +190,10 @@ export class RoomTwinCard extends LitElement {
     for (const type of ["keydown", "keyup", "blur"]) window.removeEventListener(type, this.onControlKey, true);
     this.intersection?.disconnect();
     this.resize?.disconnect();
+    this.press.cancel();
     this.onScreen = false;
     this.updateActive();
-    this.disposeTimer = setTimeout(() => this.teardown(), DISPOSE_AFTER_MS);
+    this.disposeTimer = setTimeout(() => this.teardown(), this.preview || this.replaced ? PREVIEW_DISPOSE_AFTER_MS : DISPOSE_AFTER_MS);
   }
 
   private observe(): void {
@@ -217,13 +222,17 @@ export class RoomTwinCard extends LitElement {
 
   // OrbitControls listens for Ctrl on the canvas's root node, this shadow root, to tell a held Ctrl from a trackpad
   // pinch. Focus is rarely inside the card, so without this every Ctrl+wheel notch zooms ten times too far.
-  // Leaving the window (Ctrl+Tab) sends the keyup elsewhere, so a blur counts as letting go.
+  // Leaving the window (Ctrl+Tab) sends the keyup elsewhere, so the window's blur counts as letting go. Blurs of
+  // elements inside the page pass through this capture listener too, and Ctrl is still held for those.
   private onControlKey = (e: Event): void => {
-    if (e.type === "blur") this.renderRoot.dispatchEvent(new KeyboardEvent("keyup", { key: "Control" }));
+    if (e.type === "blur") {
+      if (e.target === window) this.renderRoot.dispatchEvent(new KeyboardEvent("keyup", { key: "Control" }));
+    }
     else if ((e as KeyboardEvent).key === "Control") this.renderRoot.dispatchEvent(new KeyboardEvent(e.type, { key: "Control" }));
   };
 
   private teardown(): void {
+    clearTimeout(this.loadTimer);
     this.abort?.abort();
     this.lights?.dispose();
     this.lights = undefined;
@@ -240,10 +249,22 @@ export class RoomTwinCard extends LitElement {
     const config = this.shown;
     // Waiting until the card is on screen keeps a dashboard of rooms from downloading all of them at once.
     const visible = this.onScreen && document.visibilityState === "visible";
-    if (config && this.canvasHost && visible && this.loadedKey !== this.loadKey(config)) void this.load(config);
-    this.pins = config ? stagePins(config) : [];
+    if (config && this.canvasHost && visible && this.loadedKey !== this.loadKey(config)) this.scheduleLoad(config);
+    this.pins = config ? bindingRefs(config) : [];
     this.pinEls = [...this.renderRoot.querySelectorAll<HTMLElement>(".pin")];
     this.positionPins();
+  }
+
+  private scheduleLoad(config: RoomTwinConfig): void {
+    if (!this.preview || (!this.scene && this._status.kind !== "error")) {
+      void this.load(config);
+      return;
+    }
+    clearTimeout(this.loadTimer);
+    this.loadTimer = setTimeout(() => {
+      const latest = this.shown;
+      if (latest && this.isConnected && this.loadedKey !== this.loadKey(latest)) void this.load(latest);
+    }, PREVIEW_LOAD_DELAY_MS);
   }
 
   private async load(config: RoomTwinConfig): Promise<void> {
@@ -333,10 +354,14 @@ export class RoomTwinCard extends LitElement {
     if (entityId) this.fire("hass-more-info", { entityId });
   }
 
-  private pinTap(pin: StagePin | undefined): void {
+  private pinTap(pin: BindingRef | undefined): void {
     if (!pin) return;
     if (this._editing) {
       this.editor?.select(pin.kind, pin.index);
+      return;
+    }
+    if (pin.tap_action) {
+      this.fire("hass-action", { config: pin, action: "tap" });
       return;
     }
     const service = tapService(this._hass?.states[pin.entity]);
@@ -345,9 +370,15 @@ export class RoomTwinCard extends LitElement {
       return;
     }
     this.fire("haptic", "light");
-    this._hass.callService(service.domain, service.service, { entity_id: pin.entity }).catch((err: Error) => {
-      this.fire("hass-notification", { message: `Could not toggle ${pin.entity}: ${err?.message ?? err}` });
+    // HA's own failure toast names only the service, so it's turned off in favour of one naming the entity.
+    this._hass.callService(service.domain, service.service, { entity_id: pin.entity }, undefined, false).catch((err: Error) => {
+      this.fire("hass-notification", { message: `Could not ${service.service.replace("_", " ")} ${pin.entity}: ${err?.message ?? err}` });
     });
+  }
+
+  private pinHold(pin: BindingRef | undefined): void {
+    if (pin?.hold_action && !this._editing) this.fire("hass-action", { config: pin, action: "hold" });
+    else this.moreInfo(pin?.entity);
   }
 
   private onPinDown(e: PointerEvent): void {
@@ -404,7 +435,7 @@ export class RoomTwinCard extends LitElement {
     if (!pin) return;
     if (e.key === "ContextMenu" || (e.key === "Enter" && e.shiftKey)) {
       e.preventDefault();
-      this.moreInfo(pin.entity);
+      this.pinHold(pin);
     } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       if (!e.repeat) this.pinTap(pin);
@@ -483,6 +514,32 @@ export class RoomTwinCard extends LitElement {
     this.applyConfig(this._config!, false);
   }
 
+  private saveDraft = async (): Promise<void> => {
+    const draft = this._draft!;
+    const card = toCardConfig(draft);
+    // Set first: the new cards can arrive before the save call returns.
+    this.replaced = true;
+    try {
+      await saveCard(this._hass!, dashboardUrlPath(location.pathname), this.rawConfig!, card);
+    } catch (err) {
+      this.replaced = false;
+      throw err;
+    }
+    this.rawConfig = card;
+    this._config = draft;
+  };
+
+  private get dirty(): boolean {
+    const draft = this._draft;
+    const config = this._config;
+    if (!draft || !config || draft === config) return false;
+    const memo = this.dirtyMemo;
+    if (memo?.draft === draft && memo.config === config) return memo.dirty;
+    const dirty = toYaml(draft) !== toYaml(config);
+    this.dirtyMemo = { draft, config, dirty };
+    return dirty;
+  }
+
   private getView = () => this.scene!.currentView();
 
   private getRoomHeight = () => this.scene!.roomBounds().max.y;
@@ -491,18 +548,20 @@ export class RoomTwinCard extends LitElement {
     this.scene?.showHelper(e.detail.anchor, e.detail.radius);
   }
 
-  private renderPin(pin: StagePin, i: number, hass: HomeAssistant) {
+  private renderPin(pin: BindingRef, i: number, hass: HomeAssistant) {
     const stateObj: HassEntity | undefined = hass.states[pin.entity];
     const state = pinState(stateObj);
     const label = pinLabel(hass, stateObj);
     const name = pin.name ?? stateObj?.attributes.friendly_name ?? pin.entity;
     const title = stateObj ? name : `${pin.entity} is not in Home Assistant`;
     const spoken = spokenState(hass, stateObj);
+    const toggles = !pin.tap_action && tapService(stateObj)?.service === "toggle";
     return html`<div
       class="pin ${state} ${pin.kind}"
       data-i=${i}
       role="button"
       tabindex="0"
+      aria-pressed=${toggles ? String(state === "active") : nothing}
       title=${title}
       aria-label=${spoken ? `${name}: ${spoken}` : name}
     >
@@ -561,7 +620,7 @@ export class RoomTwinCard extends LitElement {
               @keydown=${this.onPinKey}
               @contextmenu=${(e: Event) => e.preventDefault()}
             >
-              ${stagePins(config).map((pin, i) => this.renderPin(pin, i, hass))}
+              ${bindingRefs(config).map((pin, i) => this.renderPin(pin, i, hass))}
             </div>`
           : nothing}
         ${this.renderStatus()}
@@ -584,7 +643,8 @@ export class RoomTwinCard extends LitElement {
         ? html`<roomtwin-editor
             .hass=${hass}
             .config=${this._draft}
-            .dirty=${this._draft !== this._config && toYaml(this._draft) !== toYaml(this._config!)}
+            .dirty=${this.dirty}
+            .save=${!this.preview && this.rawConfig && canSave(hass, dashboardUrlPath(location.pathname)) ? this.saveDraft : undefined}
             .getView=${this.getView}
             .getRoomHeight=${this.getRoomHeight}
             @draft-changed=${this.onDraft}

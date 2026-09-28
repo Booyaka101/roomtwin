@@ -145,6 +145,10 @@ export class RoomScene {
     // OrbitControls turns a full canvas height of drag into a full turn, far too fast on a short card.
     this.controls.rotateSpeed = 0.4;
     this.controls.addEventListener("change", () => this.requestRender());
+    // Arrow keys pan, so pins outside the saved view can be reached without a pointer.
+    canvas.tabIndex = 0;
+    canvas.setAttribute("aria-label", "Room view. Drag to turn, arrow keys to move around.");
+    this.controls.listenToKeyEvents(canvas);
   }
 
   async load(
@@ -429,6 +433,8 @@ export class RoomScene {
     this.clearHelpers();
     this.controls.dispose();
     this.mesh?.dispose();
+    // A sort still running when the worker is terminated would reject with nobody listening.
+    this.spark.autoUpdate = false;
     this.spark.dispose();
     this.renderer.dispose();
     this.renderer.forceContextLoss();

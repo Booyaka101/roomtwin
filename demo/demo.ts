@@ -93,6 +93,11 @@ function controls(home: SimHome, stateObj: HassEntity, detailed: boolean) {
                 ([name, rgb]) => html`<button
                   title=${name as string}
                   aria-label=${name as string}
+                  aria-pressed=${String(
+                    rgb
+                      ? stateObj.attributes.color_mode === "hs" && String(stateObj.attributes.rgb_color) === String(rgb)
+                      : stateObj.attributes.color_mode === "color_temp",
+                  )}
                   style="background: rgb(${((rgb as number[] | null) ?? [255, 255, 255]).join(",")})"
                   @click=${() => call("light", "turn_on", rgb ? { rgb_color: rgb } : { color_temp_kelvin: 3000 })}
                 ></button>`,
@@ -101,7 +106,10 @@ function controls(home: SimHome, stateObj: HassEntity, detailed: boolean) {
         : nothing}`;
   }
   if (domain === "cover") {
-    const open = stateObj.state === "open" || stateObj.state === "opening";
+    if (stateObj.state === "opening" || stateObj.state === "closing") {
+      return html`<button @click=${() => call("cover", "stop_cover")}>Stop</button>`;
+    }
+    const open = stateObj.state === "open";
     return html`<button @click=${() => call("cover", open ? "close_cover" : "open_cover")}>${open ? "Close" : "Open"}</button>`;
   }
   if (domain === "lock") {
@@ -118,9 +126,11 @@ function controls(home: SimHome, stateObj: HassEntity, detailed: boolean) {
   return nothing;
 }
 
+const ACTIVE = new Set(["on", "open", "opening", "closing", "unlocked", "playing"]);
+
 function row(home: SimHome, stateObj: HassEntity, icon: string) {
   return html`<li>
-    <span class="icon ${["on", "open", "unlocked"].includes(stateObj.state) ? "active" : ""}">${iconSvg(icon)}</span>
+    <span class="icon ${ACTIVE.has(stateObj.state) ? "active" : ""}">${iconSvg(icon)}</span>
     <span class="name">${stateObj.attributes.friendly_name}<small>${formatState(stateObj)}</small></span>
     <span class="controls" role="group" aria-label=${String(stateObj.attributes.friendly_name)}>${controls(home, stateObj, false)}</span>
   </li>`;
@@ -188,14 +198,29 @@ function start({ config, states }: DemoFile, slot: HTMLElement): void {
 
   card.setConfig(config);
   card.hass = home.hass;
-  card.addEventListener("hass-more-info", (e) => {
-    moreInfo = (e as CustomEvent<{ entityId: string }>).detail.entityId;
+  const openMoreInfo = (entityId: string) => {
+    moreInfo = entityId;
     if (!home.states[moreInfo]) return toast(`${moreInfo} is not in this demo home`);
     draw();
     if (!dialog.open) dialog.showModal();
+  };
+  card.addEventListener("hass-more-info", (e) => openMoreInfo((e as CustomEvent<{ entityId: string }>).detail.entityId));
+  // A pin's tap_action or hold_action. Home Assistant runs every kind; the demo only has the ones that stay on this page.
+  card.addEventListener("hass-action", (e) => {
+    const { config: pin, action } = (e as CustomEvent<{ config: Record<string, unknown> & { entity: string }; action: string }>).detail;
+    const { action: kind, entity = pin.entity } = pin[`${action}_action`] as { action: string; entity?: string };
+    if (kind === "more-info") openMoreInfo(entity);
+    else if (kind === "toggle") home.callService(domainOf(entity), "toggle", { entity_id: entity }).catch((err: Error) => toast(err.message));
+    else if (kind !== "none") toast(`${kind} works in Home Assistant, not in this demo`);
   });
   card.addEventListener("hass-notification", (e) => toast((e as CustomEvent<{ message: string }>).detail.message));
   dialog.addEventListener("close", () => (moreInfo = ""));
+  // A click on the dimmed page around the dialog lands on the dialog element itself, outside its box.
+  dialog.addEventListener("click", (e) => {
+    const box = dialog.getBoundingClientRect();
+    const outside = e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom;
+    if (e.target === dialog && outside) dialog.close();
+  });
   slot.replaceChildren(card);
   draw();
   setInterval(() => home.drift(), 5000);

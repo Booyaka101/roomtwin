@@ -1,6 +1,6 @@
 // Builds the live demo page into site/: the shipped card, a simulated home and your scan.
 // Usage: node demo/build.mjs [--config demo/room.yaml] [--splat demo/room.spz] [--states demo/states.yaml] [--out site] [--serve] [--port 4173]
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
@@ -22,6 +22,7 @@ const { values: args } = parseArgs({
   },
 });
 const SPLAT_EXTENSIONS = ["spz", "ply", "splat", "ksplat", "sog", "rad"];
+const port = Number(args.port);
 
 function fail(message) {
   console.error(`demo: ${message}`);
@@ -35,6 +36,8 @@ function readYaml(path, what) {
     fail(`${what} ${path} is not valid YAML: ${err.message}`);
   }
 }
+
+if (!Number.isInteger(port) || port < 1 || port > 65535) fail(`--port must be a number from 1 to 65535, got ${args.port}.`);
 
 const card = join(root, "dist", "roomtwin-card.js");
 if (!existsSync(card)) fail("dist/roomtwin-card.js is missing. Run npm run build first, or use npm run demo.");
@@ -55,7 +58,11 @@ if (!SPLAT_EXTENSIONS.includes(splatExt)) fail(`${splat} must end in ${SPLAT_EXT
 const splatMb = statSync(splat).size / 1e6;
 if (splatMb > 100) fail(`${splat} is ${splatMb.toFixed(0)} MB. GitHub refuses files over 100 MB; export an .spz instead.`);
 if (splatMb > 50) console.warn(`demo: ${splat} is ${splatMb.toFixed(0)} MB, which visitors on mobile will wait for. An .spz is usually 5 to 10 times smaller.`);
-if (readFileSync(splat).toString("latin1", 0, 64).startsWith("version https://git-lfs")) {
+const head = Buffer.alloc(64);
+const fd = openSync(splat, "r");
+readSync(fd, head, 0, head.length, 0);
+closeSync(fd);
+if (head.toString("latin1").startsWith("version https://git-lfs")) {
   fail(`${splat} is a Git LFS pointer, not the scan. Run git lfs pull first.`);
 }
 
@@ -123,5 +130,7 @@ if (args.serve) {
     }
     res.writeHead(200, { "Content-Type": types[extname(file)] ?? "application/octet-stream" });
     res.end(readFileSync(file));
-  }).listen(Number(args.port), "localhost", () => console.log(`demo: serving http://localhost:${args.port}/ (Ctrl+C to stop)`));
+  })
+    .on("error", (err) => fail(err.code === "EADDRINUSE" ? `port ${port} is taken. Pass --port with another one.` : err.message))
+    .listen(port, "localhost", () => console.log(`demo: serving http://localhost:${port}/ (Ctrl+C to stop)`));
 }

@@ -27,6 +27,7 @@ test("garage doors, gates, doors and unavailable or missing entities open more-i
   expect(tapService(entity("cover.drive", "closed", { device_class: "gate" }))).toBeNull();
   expect(tapService(entity("cover.patio", "closed", { device_class: "door" }))).toBeNull();
   expect(tapService(entity("light.lamp", "unavailable"))).toBeNull();
+  expect(tapService(entity("switch.kettle", "unknown"))).toBeNull();
   expect(tapService(undefined)).toBeNull();
 });
 
@@ -51,6 +52,8 @@ test("screen readers hear the state of toggles and readings, but not a scene's l
 test("pinState", () => {
   expect(pinState(undefined)).toBe("missing");
   expect(pinState(entity("light.a", "unavailable"))).toBe("unavailable");
+  expect(pinState(entity("switch.a", "unknown"))).toBe("unavailable");
+  expect(pinState(entity("scene.movie", "unknown"))).toBe("idle");
   expect(pinState(entity("light.a", "on"))).toBe("active");
   expect(pinState(entity("cover.a", "open"))).toBe("active");
   expect(pinState(entity("light.a", "off"))).toBe("idle");

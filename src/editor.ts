@@ -1,5 +1,7 @@
 import { LitElement, css, html, nothing, type PropertyValues } from "lit";
-import { ICON, LIGHT_DEFAULTS, type CameraView, type LightBinding, type PinBinding, type RoomTwinConfig, type Vec3 } from "./config";
+import { live } from "lit/directives/live.js";
+import { ENTITY_ID, ICON, LIGHT_DEFAULTS, bindingRefs, type CameraView, type LightBinding, type PinBinding, type RoomTwinConfig, type Vec3 } from "./config";
+import { SaveError } from "./dashboard";
 import { domainOf, type HomeAssistant } from "./hass";
 
 export class CollinearError extends Error {}
@@ -118,10 +120,10 @@ function yamlLines(value: unknown, indent: string): string[] {
   return [yamlScalar(value)];
 }
 
-/** Card YAML for the dashboard's code editor, leaving out options that are at their default. */
-export function toYaml(config: RoomTwinConfig): string {
+/** The card config as the dashboard should store it, leaving out options that are at their default. */
+export function toCardConfig(config: RoomTwinConfig): Record<string, unknown> {
   const { type, splat, up, floor, ceiling_cut, aspect_ratio, lod, lod_scale, camera, lights, pins, ...rest } = config;
-  const ordered: Record<string, unknown> = {
+  const ordered = {
     type,
     splat,
     up,
@@ -135,7 +137,13 @@ export function toYaml(config: RoomTwinConfig): string {
     pins: pins.length ? pins : undefined,
     ...rest,
   };
-  return yamlLines(ordered, "").join("\n") + "\n";
+  // The round trip drops options left undefined, down to a cleared label on one pin.
+  return JSON.parse(JSON.stringify(ordered, (_key, v: unknown) => (typeof v === "number" ? round(v) : v)));
+}
+
+/** Card YAML for the dashboard's code editor. */
+export function toYaml(config: RoomTwinConfig): string {
+  return yamlLines(toCardConfig(config), "").join("\n") + "\n";
 }
 
 /** Copies text, falling back to execCommand because HA over plain http is not a secure context. */
@@ -186,12 +194,17 @@ export class RoomTwinEditor extends LitElement {
     dirty: { attribute: false },
     getView: { attribute: false },
     getRoomHeight: { attribute: false },
+    save: { attribute: false },
     _selected: { state: true },
     _pending: { state: true },
     _floorPoints: { state: true },
     _entity: { state: true },
     _message: { state: true },
     _copied: { state: true },
+    _saving: { state: true },
+    _saved: { state: true },
+    _saveError: { state: true },
+    _history: { state: true },
   };
 
   hass!: HomeAssistant;
@@ -207,6 +220,16 @@ export class RoomTwinEditor extends LitElement {
   private _entity = "";
   private _message = "";
   private _copied: "" | "ok" | "failed" = "";
+  /** Writes the draft into the dashboard. Missing where the card can't save itself, like in the demo or a preview. */
+  save?: () => Promise<void>;
+  private _saving = false;
+  private _saved = false;
+  private _saveError = "";
+  private _history: RoomTwinConfig[] = [];
+  // A slider drag is one step to undo, not one per pixel.
+  private dragging = "";
+  // Sorted when the entity picker opens, not on every state update while it's open.
+  private ids: string[] = [];
 
   /** A tap on the splat landed on `point` (capture coordinates), or on nothing solid when null. */
   handlePick(point: Vec3 | null): void {
@@ -239,6 +262,7 @@ export class RoomTwinEditor extends LitElement {
       return;
     }
     this._pending = point;
+    this.ids = Object.keys(this.hass.states).sort();
   }
 
   /** Selects the binding for a pin tapped on the stage. */
@@ -252,6 +276,7 @@ export class RoomTwinEditor extends LitElement {
     this._pending = null;
     this._floorPoints = null;
     this._message = "";
+    this.dragging = "";
   }
 
   protected updated(changed: PropertyValues): void {
@@ -280,9 +305,30 @@ export class RoomTwinEditor extends LitElement {
     return { ...this.config, pins: this.config.pins.map((b, i) => (i === index ? { ...b, ...patch } : b)) };
   }
 
-  private commit(config: RoomTwinConfig): void {
+  private commit(config: RoomTwinConfig, drag = ""): void {
+    if (!drag || drag !== this.dragging) this._history = [...this._history, this.config];
+    this.dragging = drag;
+    this.show(config);
+  }
+
+  private undo(): void {
+    const previous = this._history[this._history.length - 1];
+    if (!previous) return;
+    this._history = this._history.slice(0, -1);
+    this.dragging = "";
+    this.show(previous);
+    if (!this.selectedBinding()) this._selected = null;
+  }
+
+  private endDrag(): void {
+    this.dragging = "";
+  }
+
+  private show(config: RoomTwinConfig): void {
     this.config = config;
     this._copied = "";
+    this._saved = false;
+    this._saveError = "";
     this.dispatchEvent(new CustomEvent<RoomTwinConfig>("draft-changed", { detail: config }));
   }
 
@@ -292,7 +338,8 @@ export class RoomTwinEditor extends LitElement {
     const anchor = this._pending;
     if (kind === "light") {
       const { radius, softEdge } = roomRanges(this.getRoomHeight());
-      const light = { entity, anchor, radius, soft_edge: softEdge, off_dim: LIGHT_DEFAULTS.off_dim };
+      // Rooms captured at a tiny scale would otherwise start below the smallest radius the card accepts.
+      const light = { entity, anchor, radius: Math.max(radius, 0.01), soft_edge: softEdge, off_dim: LIGHT_DEFAULTS.off_dim };
       this.commit({ ...this.config, lights: [...this.config.lights, light] });
       this._selected = { kind, index: this.config.lights.length - 1 };
     } else {
@@ -312,7 +359,25 @@ export class RoomTwinEditor extends LitElement {
   }
 
   private async copy(): Promise<void> {
+    this._saved = false;
+    this._saveError = "";
     this._copied = (await copyText(toYaml(this.config))) ? "ok" : "failed";
+  }
+
+  private async onSave(): Promise<void> {
+    this._saving = true;
+    this._copied = "";
+    this._saveError = "";
+    const sent = this.config;
+    try {
+      await this.save!();
+      // Edits made while the save was on its way weren't part of it.
+      this._saved = this.config === sent;
+    } catch (err) {
+      this._saveError = err instanceof SaveError ? err.message : `Couldn't save: ${(err as Error)?.message ?? err}.`;
+    } finally {
+      this._saving = false;
+    }
   }
 
   private close(): void {
@@ -322,6 +387,9 @@ export class RoomTwinEditor extends LitElement {
   private discard(): void {
     this.clearTask();
     this._copied = "";
+    this._saved = false;
+    this._saveError = "";
+    this._history = [];
     this.dispatchEvent(new CustomEvent("draft-discarded"));
   }
 
@@ -342,7 +410,8 @@ export class RoomTwinEditor extends LitElement {
         step=${step}
         .value=${String(binding[key])}
         @input=${(e: Event) =>
-          this.commit(this.withBinding("light", index, { [key]: Number((e.target as HTMLInputElement).value) }))}
+          this.commit(this.withBinding("light", index, { [key]: Number((e.target as HTMLInputElement).value) }), `${key}:${index}`)}
+        @change=${this.endDrag}
       />
       <output>${binding[key]}</output>
     </label>`;
@@ -353,7 +422,7 @@ export class RoomTwinEditor extends LitElement {
     return html`<label class="slider"
       ><span>${label}</span
       ><input
-        .value=${this.selectedBinding()?.[key] ?? ""}
+        .value=${live(this.selectedBinding()?.[key] ?? "")}
         placeholder=${placeholder}
         @change=${(e: Event) => {
           const value = (e.target as HTMLInputElement).value.trim();
@@ -374,7 +443,7 @@ export class RoomTwinEditor extends LitElement {
     }
     if (this._pending) {
       const entity = this._entity.trim();
-      const valid = /^[a-z0-9_]+\.[a-z0-9_]+$/.test(entity);
+      const valid = ENTITY_ID.test(entity);
       const known = valid && entity in this.hass.states;
       return html`<p>New point at [${this._pending.join(", ")}]. Which entity goes here?</p>
         <input
@@ -385,11 +454,13 @@ export class RoomTwinEditor extends LitElement {
           @input=${(e: Event) => (this._entity = (e.target as HTMLInputElement).value)}
         />
         <datalist id="entities">
-          ${Object.keys(this.hass.states)
-            .sort()
-            .map((id) => html`<option value=${id}>${this.hass.states[id].attributes.friendly_name ?? ""}</option>`)}
+          ${this.ids.map((id) => html`<option value=${id}>${this.hass.states[id]?.attributes.friendly_name ?? ""}</option>`)}
         </datalist>
-        ${valid && !known ? html`<p class="note">${entity} is not in Home Assistant right now. It will show as a grey pin.</p>` : nothing}
+        ${entity && !valid
+          ? html`<p class="note">Entity ids look like light.floor_lamp: a domain, a dot, then lowercase letters, digits and underscores.</p>`
+          : valid && !known
+            ? html`<p class="note">${entity} is not in Home Assistant right now. It will show as a grey pin.</p>`
+            : nothing}
         <div class="row">
           <button ?disabled=${!valid || !LIGHT_DOMAINS.has(domainOf(entity))} @click=${() => this.add("light")}>Add as light</button>
           <button ?disabled=${!valid} @click=${() => this.add("pin")}>Add as pin</button>
@@ -415,13 +486,26 @@ export class RoomTwinEditor extends LitElement {
     return html`<p>Tap the room to place a light or a pin. Tap an existing pin to select it.</p>`;
   }
 
+  private footerNote() {
+    if (this._saveError) {
+      return html`<p class="note error" role="alert">${this._saveError} Copy the YAML into the card's code editor instead.</p>`;
+    }
+    if (this._saved) return html`<p class="note" role="status">Saved to the dashboard.</p>`;
+    if (this._copied === "ok") {
+      return html`<p class="note" role="status">Copied. Paste it over this card's config, in the card's code editor or the dashboard's YAML file, and save.</p>`;
+    }
+    if (!this.dirty) return nothing;
+    return html`<p class="note">
+      ${this.save
+        ? "Changes live only in this browser tab until you save."
+        : "Changes live only in this browser tab until you copy the YAML into the card and save."}
+    </p>`;
+  }
+
   protected render() {
     const cut = this.config.ceiling_cut;
     const { step, cutMax, suggestedCut } = roomRanges(this.getRoomHeight());
-    const bindings = [
-      ...this.config.lights.map((b, index) => ({ kind: "light" as const, index, entity: b.entity, name: b.name })),
-      ...this.config.pins.map((b, index) => ({ kind: "pin" as const, index, entity: b.entity, name: b.name })),
-    ];
+    const bindings = bindingRefs(this.config);
     return html`
       <section class="task">
         ${this.renderTask()} ${this._message ? html`<p class="note" role="status">${this._message}</p>` : nothing}
@@ -450,7 +534,8 @@ export class RoomTwinEditor extends LitElement {
             ?disabled=${cut === undefined}
             aria-label="Ceiling cut height"
             .value=${String(cut ?? suggestedCut)}
-            @input=${(e: Event) => this.commit({ ...this.config, ceiling_cut: Number((e.target as HTMLInputElement).value) })}
+            @input=${(e: Event) => this.commit({ ...this.config, ceiling_cut: Number((e.target as HTMLInputElement).value) }, "ceiling_cut")}
+            @change=${this.endDrag}
           />
           <output>${cut === undefined ? "off" : `${cut} m`}</output>
         </label>
@@ -462,17 +547,17 @@ export class RoomTwinEditor extends LitElement {
         </div>
       </section>
       <section class="row footer">
-        <button class="primary" @click=${this.copy}>Copy YAML</button>
+        ${this.save
+          ? html`<button class="primary" ?disabled=${this._saving || !this.dirty} @click=${this.onSave}>
+              ${this._saving ? "Saving…" : "Save"}
+            </button>`
+          : nothing}
+        <button class=${this.save ? "" : "primary"} @click=${this.copy}>Copy YAML</button>
+        <button ?disabled=${!this._history.length} @click=${this.undo}>Undo</button>
         <button @click=${this.discard}>Discard changes</button>
         <button @click=${this.close}>Close</button>
       </section>
-      ${this._copied === "ok"
-        ? html`<p class="note" role="status">
-            Copied. Open the card's code editor, replace everything with the clipboard and save.
-          </p>`
-        : this.dirty
-          ? html`<p class="note">Changes live only in this browser tab until you copy the YAML into the card and save.</p>`
-          : nothing}
+      ${this.footerNote()}
       <details ?open=${this._copied === "failed"}>
         <summary>${this._copied === "failed" ? "Couldn't reach the clipboard. Select and copy this:" : "YAML"}</summary>
         <textarea readonly rows="10" .value=${toYaml(this.config)}></textarea>
@@ -495,6 +580,9 @@ export class RoomTwinEditor extends LitElement {
     }
     .note {
       color: var(--secondary-text-color);
+    }
+    .note.error {
+      color: var(--error-color, #db4437);
     }
     .row {
       display: flex;

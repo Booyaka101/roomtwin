@@ -6,12 +6,15 @@ export interface LightBinding {
   radius: number;
   soft_edge: number;
   off_dim: number;
+  name?: string;
+  icon?: string;
 }
 
 export interface PinBinding {
   entity: string;
   anchor: Vec3;
   name?: string;
+  icon?: string;
 }
 
 export interface CameraView {
@@ -49,6 +52,14 @@ export const LIGHT_DEFAULTS = { radius: 1.0, soft_edge: 0.5, off_dim: 0.45 };
 export const SPLAT_EXTENSIONS = ["spz", "ply", "splat", "ksplat", "sog", "rad"];
 
 const ENTITY_ID = /^[a-z0-9_]+\.[a-z0-9_]+$/;
+export const ICON = /^[a-z0-9-]+:[a-z0-9-]+$/;
+
+const TOP_KEYS = [
+  "type", "splat", "up", "floor", "ceiling_cut", "aspect_ratio", "lod", "lod_scale", "camera", "lights", "pins",
+  ...PASSTHROUGH,
+];
+const LIGHT_KEYS = ["entity", "anchor", "radius", "soft_edge", "off_dim", "name", "icon"];
+const PIN_KEYS = ["entity", "anchor", "name", "icon"];
 
 export class ConfigError extends Error {
   constructor(message: string) {
@@ -70,7 +81,18 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function describe(value: unknown): string {
   if (value === undefined) return "nothing";
+  if (typeof value === "number" && !Number.isFinite(value)) return String(value);
   return JSON.stringify(value);
+}
+
+// An option left empty in YAML ("floor:") arrives as null.
+function unset(value: unknown): value is undefined | null {
+  return value === undefined || value === null;
+}
+
+function checkKeys(value: Record<string, unknown>, known: readonly string[], path: string): void {
+  const unknown = Object.keys(value).filter((key) => !known.includes(key));
+  if (unknown.length > 0) throw new ConfigError(`Unknown option ${unknown.map((k) => `"${path}${k}"`).join(", ")}`);
 }
 
 function vec3(value: unknown, path: string): Vec3 {
@@ -89,8 +111,7 @@ function number(
   path: string,
   { min, max, fallback }: { min?: number; max?: number; fallback?: number },
 ): number {
-  // An option left empty in YAML ("floor:") arrives as null.
-  if ((value === undefined || value === null) && fallback !== undefined) return fallback;
+  if (unset(value) && fallback !== undefined) return fallback;
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new ConfigError(`${path} must be a number, got ${describe(value)}`);
   }
@@ -107,56 +128,69 @@ function entityId(value: unknown, path: string): string {
 }
 
 function list(value: unknown, path: string): unknown[] {
-  if (value === undefined || value === null) return [];
+  if (unset(value)) return [];
   if (!Array.isArray(value)) throw new ConfigError(`${path} must be a list, got ${describe(value)}`);
   return value;
 }
 
 /** Width over height for a validated aspect_ratio value; 16:9 when unset. */
 export function aspectRatio(value: unknown): number {
-  if (value === undefined) return 16 / 9;
-  if (typeof value === "number" && value > 0) return value;
+  if (unset(value)) return 16 / 9;
+  if (typeof value === "number" && value > 0 && Number.isFinite(value)) return value;
   const match = typeof value === "string" ? /^\s*(\d+(?:\.\d+)?)\s*[:/x]\s*(\d+(?:\.\d+)?)\s*$/.exec(value) : null;
   if (match && Number(match[1]) > 0 && Number(match[2]) > 0) return Number(match[1]) / Number(match[2]);
   throw new ConfigError(`aspect_ratio must look like "16:9" or be a positive number, got ${describe(value)}`);
 }
 
+/** The name and icon overrides both kinds of binding share. */
+function labels(value: Record<string, unknown>, path: string): { name?: string; icon?: string } {
+  const result: { name?: string; icon?: string } = {};
+  if (!unset(value.name)) {
+    // An unquoted number in YAML, like a room number, is still meant as text.
+    if (typeof value.name !== "string" && typeof value.name !== "number") {
+      throw new ConfigError(`${path}.name must be text, got ${describe(value.name)}`);
+    }
+    result.name = String(value.name);
+  }
+  if (!unset(value.icon)) {
+    if (typeof value.icon !== "string" || !ICON.test(value.icon)) {
+      throw new ConfigError(`${path}.icon must be an icon like mdi:lamp, got ${describe(value.icon)}`);
+    }
+    result.icon = value.icon;
+  }
+  return result;
+}
+
+function binding(value: unknown, path: string, keys: readonly string[]) {
+  if (!isObject(value)) throw new ConfigError(`${path} must be a mapping with entity and anchor, got ${describe(value)}`);
+  checkKeys(value, keys, `${path}.`);
+  return { raw: value, entity: entityId(value.entity, `${path}.entity`), anchor: vec3(value.anchor, `${path}.anchor`) };
+}
+
 function light(value: unknown, i: number): LightBinding {
   const path = `lights[${i}]`;
-  if (!isObject(value)) throw new ConfigError(`${path} must be a mapping with entity and anchor, got ${describe(value)}`);
+  const { raw, entity, anchor } = binding(value, path, LIGHT_KEYS);
   return {
-    entity: entityId(value.entity, `${path}.entity`),
-    anchor: vec3(value.anchor, `${path}.anchor`),
-    radius: number(value.radius, `${path}.radius`, { min: 0.01, fallback: LIGHT_DEFAULTS.radius }),
-    soft_edge: number(value.soft_edge, `${path}.soft_edge`, { min: 0, fallback: LIGHT_DEFAULTS.soft_edge }),
-    off_dim: number(value.off_dim, `${path}.off_dim`, { min: 0, max: 1, fallback: LIGHT_DEFAULTS.off_dim }),
+    entity,
+    anchor,
+    radius: number(raw.radius, `${path}.radius`, { min: 0.01, fallback: LIGHT_DEFAULTS.radius }),
+    soft_edge: number(raw.soft_edge, `${path}.soft_edge`, { min: 0, fallback: LIGHT_DEFAULTS.soft_edge }),
+    off_dim: number(raw.off_dim, `${path}.off_dim`, { min: 0, max: 1, fallback: LIGHT_DEFAULTS.off_dim }),
+    ...labels(raw, path),
   };
 }
 
 function pin(value: unknown, i: number): PinBinding {
   const path = `pins[${i}]`;
-  if (!isObject(value)) throw new ConfigError(`${path} must be a mapping with entity and anchor, got ${describe(value)}`);
-  const result: PinBinding = {
-    entity: entityId(value.entity, `${path}.entity`),
-    anchor: vec3(value.anchor, `${path}.anchor`),
-  };
-  if (value.name !== undefined) {
-    if (typeof value.name !== "string") throw new ConfigError(`${path}.name must be text, got ${describe(value.name)}`);
-    result.name = value.name;
-  }
-  return result;
+  const { raw, entity, anchor } = binding(value, path, PIN_KEYS);
+  return { entity, anchor, ...labels(raw, path) };
 }
 
 /** Validates a raw card config and fills in defaults. Throws ConfigError with a message meant for the user. */
 export function parseConfig(raw: unknown): RoomTwinConfig {
   if (!isObject(raw)) throw new ConfigError("RoomTwin card config must be a mapping");
 
-  const known = new Set<string>([
-    "type", "splat", "up", "floor", "ceiling_cut", "aspect_ratio", "lod", "lod_scale", "camera", "lights", "pins",
-    ...PASSTHROUGH,
-  ]);
-  const unknown = Object.keys(raw).filter((key) => !known.has(key));
-  if (unknown.length > 0) throw new ConfigError(`Unknown option ${unknown.map((k) => `"${k}"`).join(", ")}`);
+  checkKeys(raw, TOP_KEYS, "");
 
   if (typeof raw.splat !== "string" || raw.splat.trim() === "") {
     throw new ConfigError("splat is required: the URL of your capture, e.g. /local/roomtwin/living.spz");
@@ -167,10 +201,11 @@ export function parseConfig(raw: unknown): RoomTwinConfig {
     throw new ConfigError(`splat must end in ${SPLAT_EXTENSIONS.map((e) => "." + e).join(", ")}, got "${splat}"`);
   }
 
-  const up = raw.up === undefined ? DEFAULT_UP : vec3(raw.up, "up");
-  if (Math.hypot(...up) < 1e-6) throw new ConfigError("up must not be [0, 0, 0]");
+  const up = unset(raw.up) ? DEFAULT_UP : vec3(raw.up, "up");
+  // The card writes up with four decimals, so anything shorter would not survive a copy.
+  if (Math.hypot(...up) < 1e-3) throw new ConfigError(`up must point somewhere, like [0, 1, 0], got ${describe(up)}`);
 
-  if (raw.lod !== undefined && typeof raw.lod !== "boolean") {
+  if (!unset(raw.lod) && typeof raw.lod !== "boolean") {
     throw new ConfigError(`lod must be true or false, got ${describe(raw.lod)}`);
   }
 
@@ -185,17 +220,18 @@ export function parseConfig(raw: unknown): RoomTwinConfig {
     pins: list(raw.pins, "pins").map(pin),
   };
 
-  if (raw.aspect_ratio !== undefined) {
+  if (!unset(raw.aspect_ratio)) {
     aspectRatio(raw.aspect_ratio);
     config.aspect_ratio = raw.aspect_ratio as string | number;
   }
 
-  if (raw.ceiling_cut !== undefined && raw.ceiling_cut !== null) {
+  if (!unset(raw.ceiling_cut)) {
     config.ceiling_cut = number(raw.ceiling_cut, "ceiling_cut", { min: 0 });
   }
 
-  if (raw.camera !== undefined) {
+  if (!unset(raw.camera)) {
     if (!isObject(raw.camera)) throw new ConfigError(`camera must have position and target, got ${describe(raw.camera)}`);
+    checkKeys(raw.camera, ["position", "target"], "camera.");
     config.camera = {
       position: vec3(raw.camera.position, "camera.position"),
       target: vec3(raw.camera.target, "camera.target"),

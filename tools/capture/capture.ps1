@@ -49,6 +49,13 @@ $WorkDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPa
 if ($isVideo) { Resolve-Tool $Ffmpeg "Install it with 'winget install Gyan.FFmpeg' or pass -Ffmpeg <path to ffmpeg.exe>." }
 Resolve-Tool $Colmap "Download COLMAP from https://github.com/colmap/colmap/releases and pass -Colmap <path to colmap.exe>, or add it to PATH."
 Resolve-Tool $Brush "Download Brush from https://github.com/ArthurBrussee/brush/releases and pass -Brush <path to brush_app.exe>, or add it to PATH."
+if ($Spz) {
+  Resolve-Tool "node" "-Spz needs Node.js 20 or newer: 'winget install OpenJS.NodeJS.LTS'."
+  $repo = Split-Path (Split-Path $PSScriptRoot)
+  if (-not (Test-Path -LiteralPath (Join-Path $repo "node_modules\@sparkjsdev\spark"))) {
+    throw "-Spz needs the repo's packages. Run 'npm ci' once in $repo."
+  }
+}
 
 $images = Join-Path $WorkDir "images"
 $database = Join-Path $WorkDir "database.db"
@@ -93,8 +100,14 @@ if ($registered -lt $frameCount * 0.6) {
   Write-Warning "Only $registered of $frameCount images could be placed, so parts of the room will be blurry or missing. Reshoot slower with more overlap; see tools/capture/README.md."
 }
 
-Invoke-Step "Brush training ($Steps steps)" $Brush @($dataset, "--total-steps", "$Steps", "--export-every", "$Steps",
-  "--export-path", $WorkDir, "--export-name", "$Name.ply")
+# Brush leaves a GPU autotune cache in the current folder.
+Push-Location -LiteralPath $WorkDir
+try {
+  Invoke-Step "Brush training ($Steps steps)" $Brush @($dataset, "--total-steps", "$Steps", "--export-every", "$Steps",
+    "--export-path", $WorkDir, "--export-name", "$Name.ply")
+} finally {
+  Pop-Location
+}
 if (-not (Test-Path -LiteralPath $ply)) { throw "Brush finished without writing $ply." }
 
 $result = $ply
@@ -102,6 +115,7 @@ if ($Spz) {
   $script = Join-Path $PSScriptRoot "ply-to-spz.mjs"
   Invoke-Step "Converting to .spz" "node" @($script, $ply)
   $result = [IO.Path]::ChangeExtension($ply, ".spz")
+  if (-not (Test-Path -LiteralPath $result)) { throw "The .spz conversion finished without writing $result." }
 }
 Write-Host ""
 Write-Host "Done: $result"

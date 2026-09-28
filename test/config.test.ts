@@ -56,7 +56,12 @@ describe("parseConfig", () => {
     [{ splat: "  " }, "splat is required"],
     [{ splat: "/local/room.glb" }, 'splat must end in .spz, .ply, .splat, .ksplat, .sog, .rad, got "/local/room.glb"'],
     [{ ...base, up: [0, 1] }, "up must be a list of three numbers like [0, 1.2, -0.5], got [0,1]"],
-    [{ ...base, up: [0, 0, 0] }, "up must not be [0, 0, 0]"],
+    [{ ...base, up: [0, 0, 0] }, "up must point somewhere, like [0, 1, 0], got [0,0,0]"],
+    [{ ...base, up: [0, 0.0001, 0] }, "up must point somewhere"],
+    [{ ...base, floor: Number.NaN }, "floor must be a number"],
+    [{ ...base, lod_scale: Number.POSITIVE_INFINITY }, "lod_scale must be a number"],
+    [{ ...base, aspect_ratio: Number.POSITIVE_INFINITY }, "aspect_ratio must look like"],
+    [{ ...base, camera: { position: [0, 1, 2], target: [0, 0, 0], fov: 50 } }, 'Unknown option "camera.fov"'],
     [{ ...base, lod: "yes" }, 'lod must be true or false, got "yes"'],
     [{ ...base, lod_scale: 20 }, "lod_scale must be at most 8, got 20"],
     [{ ...base, ceiling_cut: -1 }, "ceiling_cut must be at least 0, got -1"],
@@ -79,7 +84,10 @@ describe("parseConfig", () => {
       { ...base, pins: [{ entity: "sensor.t", anchor: [0, 0, "1"] }] },
       'pins[0].anchor must be a list of three numbers like [0, 1.2, -0.5], got [0,0,"1"]',
     ],
-    [{ ...base, pins: [{ entity: "sensor.t", anchor: [0, 0, 1], name: 5 }] }, "pins[0].name must be text, got 5"],
+    [{ ...base, pins: [{ entity: "sensor.t", anchor: [0, 0, 1], name: ["a"] }] }, 'pins[0].name must be text, got ["a"]'],
+    [{ ...base, pins: [{ entity: "sensor.t", anchor: [0, 0, 1], icon: "lamp" }] }, "pins[0].icon must be an icon like mdi:lamp"],
+    [{ ...base, pins: [{ entity: "sensor.t", anchor: [0, 0, 1], nmae: "T" }] }, 'Unknown option "pins[0].nmae"'],
+    [{ ...base, lights: [{ entity: "light.a", anchor: [0, 0, 0], raduis: 2 }] }, 'Unknown option "lights[0].raduis"'],
     [{ ...base, light: [] }, 'Unknown option "light"'],
   ])("rejects %j", (raw, message) => {
     expect(error(raw)).toContain(message);
@@ -107,6 +115,24 @@ describe("parseConfig", () => {
   test("an option left empty in YAML falls back to its default", () => {
     const config = parseConfig({ ...base, floor: null, lod_scale: null, ceiling_cut: null });
     expect([config.floor, config.lod_scale, config.ceiling_cut]).toEqual([0, 1, undefined]);
+    const more = parseConfig({ ...base, up: null, lod: null, camera: null, aspect_ratio: null });
+    expect([more.up, more.lod, more.camera, more.aspect_ratio]).toEqual([[0, -1, 0], true, undefined, undefined]);
+  });
+
+  test("lights and pins take a name and an icon", () => {
+    const config = parseConfig({
+      ...base,
+      lights: [{ entity: "light.a", anchor: [0, 0, 0], name: "Lamp", icon: "mdi:floor-lamp" }],
+      pins: [{ entity: "sensor.t", anchor: [0, 0, 1], name: 21, icon: "hass:thermometer" }],
+    });
+    expect(config.lights[0]).toMatchObject({ name: "Lamp", icon: "mdi:floor-lamp" });
+    expect(config.pins[0]).toEqual({ entity: "sensor.t", anchor: [0, 0, 1], name: "21", icon: "hass:thermometer" });
+  });
+
+  test("layout keys from older dashboards are kept", () => {
+    const config = parseConfig({ ...base, view_layout: { position: "main" }, layout_options: { grid_columns: 4 } });
+    expect(config.view_layout).toEqual({ position: "main" });
+    expect(config.layout_options).toEqual({ grid_columns: 4 });
   });
 });
 

@@ -1,5 +1,5 @@
 import { LitElement, css, html, nothing, type PropertyValues } from "lit";
-import { LIGHT_DEFAULTS, type CameraView, type LightBinding, type PinBinding, type RoomTwinConfig, type Vec3 } from "./config";
+import { ICON, LIGHT_DEFAULTS, type CameraView, type LightBinding, type PinBinding, type RoomTwinConfig, type Vec3 } from "./config";
 import { domainOf, type HomeAssistant } from "./hass";
 
 export class CollinearError extends Error {}
@@ -25,9 +25,10 @@ export function floorFromPoints(points: [Vec3, Vec3, Vec3], viewer: Vec3): { up:
   const ab = sub(b, a);
   const ac = sub(c, a);
   const normal = cross(ab, ac);
-  // |ab x ac| = |ab||ac| sin(angle); under ~3 degrees the plane is mostly noise.
-  const spread = length(ab) * length(ac);
-  if (spread < 1e-8 || length(normal) / spread < 0.05) {
+  // |ab x ac| is twice the triangle's area. Against the longest side squared it is small for any sliver,
+  // whether the points are nearly in a line or two of them nearly coincide, and then the plane is mostly noise.
+  const longest = Math.max(length(ab), length(ac), length(sub(c, b)));
+  if (longest < 1e-4 || length(normal) / longest ** 2 < 0.05) {
     throw new CollinearError(
       "Those three points are in a line or on top of each other. Tap three spots spread out across the floor, like the corners of a rug.",
     );
@@ -56,7 +57,7 @@ export function roomRanges(roomHeight: number): RoomRanges {
   const coarse = 10 ** (places - 1);
   const roundUp = (n: number) => round(Math.ceil(n * coarse - 1e-9) / coarse, places);
   return {
-    step: 10 ** -places,
+    step: 1 / 10 ** places,
     radiusMax: roundUp(height * 2),
     softEdgeMax: roundUp(height),
     cutMax: roundUp(height * 1.2),
@@ -83,6 +84,16 @@ function isScalar(value: unknown): boolean {
   return value === null || typeof value !== "object";
 }
 
+function definedEntries(value: object): [string, unknown][] {
+  return Object.entries(value).filter(([, v]) => v !== undefined);
+}
+
+/** Values written on the same line as their key or list dash. */
+function isInline(value: unknown): boolean {
+  if (Array.isArray(value)) return value.every(isScalar);
+  return isScalar(value) || definedEntries(value as object).length === 0;
+}
+
 function yamlLines(value: unknown, indent: string): string[] {
   if (Array.isArray(value)) {
     if (value.every(isScalar)) return [`[${value.map(yamlScalar).join(", ")}]`];
@@ -92,12 +103,12 @@ function yamlLines(value: unknown, indent: string): string[] {
     });
   }
   if (typeof value === "object" && value !== null) {
-    return Object.entries(value)
-      .filter(([, v]) => v !== undefined)
-      .flatMap(([key, v]) => {
-        if (isScalar(v) || (Array.isArray(v) && v.every(isScalar))) return [`${indent}${key}: ${yamlLines(v, "")[0]}`];
-        return [`${indent}${key}:`, ...yamlLines(v, indent + "  ")];
-      });
+    const entries = definedEntries(value);
+    if (entries.length === 0) return [`${indent}{}`];
+    return entries.flatMap(([key, v]) => {
+      if (isInline(v)) return [`${indent}${yamlString(key)}: ${yamlLines(v, "")[0]}`];
+      return [`${indent}${yamlString(key)}:`, ...yamlLines(v, indent + "  ")];
+    });
   }
   return [yamlScalar(value)];
 }
@@ -134,10 +145,13 @@ export async function copyText(text: string): Promise<boolean> {
   }
   const area = document.createElement("textarea");
   area.value = text;
+  area.readOnly = true;
   area.style.position = "fixed";
   area.style.opacity = "0";
   document.body.appendChild(area);
   area.select();
+  // iOS Safari ignores select() on its own.
+  area.setSelectionRange(0, text.length);
   try {
     return document.execCommand("copy");
   } catch {
@@ -300,6 +314,7 @@ export class RoomTwinEditor extends LitElement {
 
   private discard(): void {
     this.clearTask();
+    this._copied = "";
     this.dispatchEvent(new CustomEvent("draft-discarded"));
   }
 
@@ -324,6 +339,25 @@ export class RoomTwinEditor extends LitElement {
       />
       <output>${binding[key]}</output>
     </label>`;
+  }
+
+  private textField(label: string, key: "name" | "icon", placeholder: string) {
+    const { kind, index } = this._selected!;
+    return html`<label class="slider"
+      ><span>${label}</span
+      ><input
+        .value=${this.selectedBinding()?.[key] ?? ""}
+        placeholder=${placeholder}
+        @change=${(e: Event) => {
+          const value = (e.target as HTMLInputElement).value.trim();
+          if (key === "icon" && value && !ICON.test(value)) {
+            this._message = `${value} is not an icon name. Icons look like mdi:lamp.`;
+            return;
+          }
+          this._message = "";
+          this.commit(this.withBinding(kind, index, { [key]: value || undefined }));
+        }}
+    /></label>`;
   }
 
   private renderTask() {
@@ -360,19 +394,12 @@ export class RoomTwinEditor extends LitElement {
       const ranges = roomRanges(this.getRoomHeight());
       return html`<p><strong>${this.name(binding.entity)}</strong>. Tap the room to move it.</p>
         ${this._selected.kind === "light"
-          ? html`${this.slider("Radius (m)", "radius", ranges.step * 10, ranges.radiusMax, ranges.step)}
+          ? html`${this.slider("Radius (m)", "radius", Math.max(0.01, ranges.step * 10), ranges.radiusMax, ranges.step)}
             ${this.slider("Soft edge (m)", "soft_edge", 0, ranges.softEdgeMax, ranges.step)}
             ${this.slider("Brightness when off", "off_dim", 0, 1, 0.01)}`
-          : html`<label class="slider"
-              ><span>Label</span
-              ><input
-                .value=${(binding as PinBinding).name ?? ""}
-                placeholder=${this.hass.states[binding.entity]?.attributes.friendly_name ?? ""}
-                @change=${(e: Event) =>
-                  this.commit(
-                    this.withBinding("pin", this._selected!.index, { name: (e.target as HTMLInputElement).value || undefined }),
-                  )}
-            /></label>`}
+          : nothing}
+        ${this.textField("Label", "name", this.hass.states[binding.entity]?.attributes.friendly_name ?? "")}
+        ${this.textField("Icon", "icon", "mdi:lamp")}
         <div class="row">
           <button @click=${() => (this._selected = null)}>Done</button>
           <button class="danger" @click=${this.removeSelected}>Remove</button>
@@ -385,7 +412,7 @@ export class RoomTwinEditor extends LitElement {
     const cut = this.config.ceiling_cut;
     const { step, cutMax, suggestedCut } = roomRanges(this.getRoomHeight());
     const bindings = [
-      ...this.config.lights.map((b, index) => ({ kind: "light" as const, index, entity: b.entity, name: undefined })),
+      ...this.config.lights.map((b, index) => ({ kind: "light" as const, index, entity: b.entity, name: b.name })),
       ...this.config.pins.map((b, index) => ({ kind: "pin" as const, index, entity: b.entity, name: b.name })),
     ];
     return html`

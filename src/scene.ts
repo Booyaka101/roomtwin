@@ -186,7 +186,10 @@ export class RoomScene {
 
   /** Rotates the capture so `up` points along +Y and moves the floor plane to y = 0. */
   setOrientation(up: Vec3, floor: number): void {
-    this.up.fromArray(up).normalize();
+    // Every slider move re-applies the config, and re-measuring the bounds takes a 100k-point sort.
+    const next = new THREE.Vector3().fromArray(up).normalize();
+    if (next.equals(this.up) && floor === this.floor) return;
+    this.up.copy(next);
     this.floor = floor;
     this.root.quaternion.setFromUnitVectors(this.up, Y_UP);
     this.root.position.set(0, -floor, 0);

@@ -1,17 +1,33 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as THREE from "three";
-import { HOLD_MS, PressGesture, pinLabel, pinState, projectToScreen, tapService } from "../src/pins";
+import { HOLD_MS, PressGesture, pinLabel, pinState, projectToScreen, spokenState, tapService } from "../src/pins";
 import type { HomeAssistant } from "../src/hass";
 import { entity } from "./helpers";
 
 const hass = { states: {}, callService: async () => undefined } as HomeAssistant;
 
-test("tap toggles lights, switches, covers, fans and input booleans; everything else opens more-info", () => {
-  expect(tapService("light.lamp")).toEqual({ domain: "light", service: "toggle" });
-  expect(tapService("switch.kettle")).toEqual({ domain: "switch", service: "toggle" });
-  expect(tapService("cover.blind")).toEqual({ domain: "cover", service: "toggle" });
-  expect(tapService("sensor.temperature")).toBeNull();
-  expect(tapService("lock.front_door")).toBeNull();
+test("tap toggles lights, switches, covers, fans and input booleans; sensors and locks open more-info", () => {
+  expect(tapService(entity("light.lamp", "off"))).toEqual({ domain: "light", service: "toggle" });
+  expect(tapService(entity("switch.kettle", "on"))).toEqual({ domain: "switch", service: "toggle" });
+  expect(tapService(entity("cover.blind", "open", { device_class: "blind" }))).toEqual({ domain: "cover", service: "toggle" });
+  expect(tapService(entity("sensor.temperature", "21"))).toBeNull();
+  expect(tapService(entity("lock.front_door", "locked"))).toBeNull();
+});
+
+test("scenes, scripts and buttons run on a tap", () => {
+  expect(tapService(entity("scene.movie", "unknown"))).toEqual({ domain: "scene", service: "turn_on" });
+  expect(tapService(entity("script.bedtime", "off"))).toEqual({ domain: "script", service: "turn_on" });
+  expect(tapService(entity("button.restart", "unknown"))).toEqual({ domain: "button", service: "press" });
+  expect(tapService(entity("input_button.doorbell", "unknown"))).toEqual({ domain: "input_button", service: "press" });
+  expect(pinLabel(hass, entity("scene.movie", "2026-09-28T10:00:00+00:00"))).toBe("");
+});
+
+test("garage doors, gates, doors and unavailable or missing entities open more-info instead", () => {
+  expect(tapService(entity("cover.garage", "closed", { device_class: "garage" }))).toBeNull();
+  expect(tapService(entity("cover.drive", "closed", { device_class: "gate" }))).toBeNull();
+  expect(tapService(entity("cover.patio", "closed", { device_class: "door" }))).toBeNull();
+  expect(tapService(entity("light.lamp", "unavailable"))).toBeNull();
+  expect(tapService(undefined)).toBeNull();
 });
 
 test("sensor pins show state and unit, toggles show nothing", () => {
@@ -21,6 +37,15 @@ test("sensor pins show state and unit, toggles show nothing", () => {
   expect(pinLabel(hass, undefined)).toBe("");
   const formatted = { ...hass, formatEntityState: () => "21,5 °C" };
   expect(pinLabel(formatted, entity("sensor.t", "21.5", { unit_of_measurement: "°C" }))).toBe("21,5 °C");
+});
+
+test("screen readers hear the state of toggles and readings, but not a scene's last-run time", () => {
+  const formatted = { ...hass, formatEntityState: (s: { state: string }) => s.state.toUpperCase() };
+  expect(spokenState(formatted, entity("light.lamp", "on"))).toBe("ON");
+  expect(spokenState(hass, entity("sensor.t", "21.5", { unit_of_measurement: "°C" }))).toBe("21.5 °C");
+  expect(spokenState(formatted, entity("scene.movie", "2026-09-28T10:00:00+00:00"))).toBe("");
+  expect(spokenState(formatted, entity("button.push", "unknown"))).toBe("");
+  expect(spokenState(hass, undefined)).toBe("not in Home Assistant");
 });
 
 test("pinState", () => {

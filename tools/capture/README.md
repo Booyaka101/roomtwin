@@ -14,7 +14,7 @@ If you have Scaniverse on your phone, that's quicker and gives real-world scale.
 - Windows and a gaming-class GPU. Brush runs on NVIDIA, AMD and Intel GPUs; COLMAP's fast build needs NVIDIA.
 - ffmpeg: `winget install Gyan.FFmpeg`
 - COLMAP: `colmap-x64-windows-cuda.zip` from [COLMAP releases](https://github.com/colmap/colmap/releases), or `colmap-x64-windows-nocuda.zip` without an NVIDIA card. Unzip it anywhere; the exe is `bin\colmap.exe`.
-- Brush: `brush-app-x86_64-pc-windows-msvc.zip` from [Brush releases](https://github.com/ArthurBrussee/brush/releases). Unzip it; the exe is `brush_app.exe`. Tested with Brush 0.3.0 and COLMAP 4.2.0.
+- Brush: `brush-app-x86_64-pc-windows-msvc.zip` from [Brush releases](https://github.com/ArthurBrussee/brush/releases). Unzip it; the exe is `brush_app.exe`. Tested with Brush 0.3.0 and COLMAP 4.2.0. Older COLMAP 3.x builds use different option names and will fail at feature extraction.
 - For `-Spz` only: Node.js 20 or newer, and `npm ci` run once in the root of this repo.
 
 Either add the COLMAP `bin` folder and the Brush folder to PATH, or pass their paths with `-Colmap` and `-Brush`.
@@ -40,7 +40,7 @@ From the repo root in PowerShell:
 
 If PowerShell says running scripts is disabled on this system, start it through `powershell -ExecutionPolicy Bypass -File .\tools\capture\capture.ps1` with the same parameters instead.
 
-The work goes into `.\roomtwin-capture\living\`. For scale, 112 frames took 9 minutes end to end on an RTX 4090, most of it Brush training. The last lines tell you the file to copy:
+Everything goes into `.\roomtwin-capture\living\`: the frames, the COLMAP model, a `target\autotune` cache Brush writes, and the splat. Once the splat is copied to Home Assistant you can delete the folder. For scale, 112 frames took 9 minutes end to end on an RTX 4090, most of it Brush training. The last lines tell you the file to copy:
 
 ```
 Done: D:\roomtwin\roomtwin-capture\living\living.spz
@@ -54,7 +54,7 @@ Copy it to /config/www/roomtwin/ on Home Assistant and point the card at /local/
 | `-WorkDir` | `.\roomtwin-capture\<Name>` | Where everything goes. It must not exist yet. |
 | `-Fps` | `2` | Frames taken per second of video. Aim for 150 to 300 frames in total. |
 | `-Steps` | `30000` | Brush training steps. Fewer is faster and blurrier. |
-| `-MaxImageSize` | `1600` | Longest side of the frames, in pixels. |
+| `-MaxImageSize` | `1600` | Longest side of the frames, in pixels. Video frames are scaled to it; photos are copied as they are and COLMAP reads them at this size. |
 | `-Spz` | off | Also write a `.spz` next to the `.ply`. |
 | `-Ffmpeg`, `-Colmap`, `-Brush` | found on PATH | Paths to the tools. |
 

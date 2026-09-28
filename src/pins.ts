@@ -30,19 +30,41 @@ export function projectToScreen(world: THREE.Vector3, camera: THREE.Camera, widt
 }
 
 const TOGGLE_DOMAINS = new Set(["light", "switch", "cover", "fan", "input_boolean"]);
+const PRESS_SERVICES = new Map([
+  ["scene", "turn_on"],
+  ["script", "turn_on"],
+  ["button", "press"],
+  ["input_button", "press"],
+]);
+const TIMESTAMP_STATES = new Set(["scene", "button", "input_button"]);
+// Opening one of these by brushing a pin is worse than the extra tap through more-info.
+const GUARDED_COVERS = new Set(["garage", "gate", "door"]);
 
 /** Service a tap calls for this entity, or null when a tap should open more-info instead. */
-export function tapService(entityId: string): { domain: string; service: string } | null {
-  const domain = domainOf(entityId);
-  return TOGGLE_DOMAINS.has(domain) ? { domain, service: "toggle" } : null;
+export function tapService(stateObj: HassEntity | undefined): { domain: string; service: string } | null {
+  if (!stateObj || stateObj.state === "unavailable") return null;
+  const domain = domainOf(stateObj.entity_id);
+  if (domain === "cover" && GUARDED_COVERS.has(String(stateObj.attributes.device_class))) return null;
+  if (TOGGLE_DOMAINS.has(domain)) return { domain, service: "toggle" };
+  const service = PRESS_SERVICES.get(domain);
+  return service ? { domain, service } : null;
 }
 
-/** Text shown on a pin: the formatted state for readings, nothing for things you toggle. */
+/** Text shown on a pin: the formatted state for readings, nothing for things you tap to use. */
 export function pinLabel(hass: HomeAssistant, stateObj: HassEntity | undefined): string {
-  if (!stateObj || TOGGLE_DOMAINS.has(domainOf(stateObj.entity_id))) return "";
+  if (!stateObj) return "";
+  const domain = domainOf(stateObj.entity_id);
+  if (TOGGLE_DOMAINS.has(domain) || PRESS_SERVICES.has(domain)) return "";
   if (hass.formatEntityState) return hass.formatEntityState(stateObj);
   const unit = stateObj.attributes.unit_of_measurement;
   return unit ? `${stateObj.state} ${unit}` : stateObj.state;
+}
+
+/** State read out to screen readers after the pin's name. Scenes and buttons only hold the time they last ran. */
+export function spokenState(hass: HomeAssistant, stateObj: HassEntity | undefined): string {
+  if (!stateObj) return "not in Home Assistant";
+  if (TIMESTAMP_STATES.has(domainOf(stateObj.entity_id))) return "";
+  return pinLabel(hass, stateObj) || (hass.formatEntityState?.(stateObj) ?? stateObj.state);
 }
 
 const ACTIVE_STATES = new Set(["on", "open", "opening", "closing", "playing", "home", "heat", "cool", "heat_cool"]);

@@ -45,6 +45,8 @@ Copy the file to `/config/www/roomtwin/`, for example with the File editor or Sa
 
 If `www` didn't exist before, restart Home Assistant once so it starts serving the folder.
 
+Files under `/local/` are served without a login. Anyone who can reach your Home Assistant and guesses the file name can download the scan of your room. If your instance is reachable from the internet and you'd rather keep the scan private, keep it off a public instance or use a file name nobody will guess.
+
 ## 3. Install the card
 
 With [HACS](https://hacs.xyz):
@@ -53,7 +55,16 @@ With [HACS](https://hacs.xyz):
 2. Add `https://github.com/Booyaka101/roomtwin` with type **Dashboard**.
 3. Open RoomTwin in HACS and download it. HACS registers the dashboard resource for you. Reload the browser.
 
-Manual install: download `roomtwin-card.js` from the [latest release](https://github.com/Booyaka101/roomtwin/releases/latest), copy it to `/config/www/roomtwin-card.js`, then add `/local/roomtwin-card.js` as a **JavaScript module** under Settings, Dashboards, three-dot menu, Resources.
+Manual install: download `roomtwin-card.js` from the [latest release](https://github.com/Booyaka101/roomtwin/releases/latest) and copy it to `/config/www/roomtwin-card.js`. Then under Settings, Dashboards, three-dot menu, Resources, add `/local/roomtwin-card.js?v=0.1.0` as a **JavaScript module**. The Resources entry only shows with Advanced mode turned on in your user profile. Bump the `?v=` part whenever you replace the file, or browsers keep the old one.
+
+If your dashboards are in YAML mode, add the resource to `configuration.yaml` instead:
+
+```yaml
+lovelace:
+  resources:
+    - url: /local/roomtwin-card.js?v=0.1.0
+      type: module
+```
 
 ## 4. Add the card and place your devices
 
@@ -70,16 +81,21 @@ Admins see a pencil button in the corner. It opens edit mode, which works on the
 
 1. **Set floor (tap 3 points)**: tap three spots spread across the floor. The room turns upright with the floor at height 0. It refuses three points in a line.
 2. **Tap the room** where a lamp or device is. Type or pick an entity, then choose **Add as light** (lights and switches) or **Add as pin** (anything).
-3. For a light, set **Radius**, **Soft edge** and **Brightness when off** with the sliders while you watch the room. Flip the real light to check it.
+3. For a light, set **Radius (m)**, **Soft edge (m)** and **Brightness when off** with the sliders while you watch the room. Flip the real light to check it. **Label** and **Icon** override the entity's name and icon on the pin, for lights and pins alike.
 4. Optionally turn on **Ceiling cut** so you can see into the room from above, and press **Use this view as default** once the camera is where you like it.
 5. Press **Copy YAML**, open the card's code editor, replace everything with the clipboard, and save.
 
 Nothing is saved until step 5. The editor says so while you have unsaved changes, and **Discard changes** puts everything back.
 
+The card's visual editor in the dashboard dialog covers the plain options: the splat file, aspect ratio, detail and ceiling cut height. Changing them there keeps your lights, pins and camera.
+
 ## Using the card
 
 - **Tap** a light, switch, cover, fan or input_boolean pin to toggle it. The room region around a bound light follows its state, brightness and colour on the next frame.
-- **Long-press** any pin to open the more-info dialog. Tapping a sensor or anything else that can't toggle opens more-info too.
+- Tapping a scene or script runs it, and tapping a button or input_button presses it.
+- Garage doors, gates and doors (covers with those device classes) open more-info on tap instead of moving, so brushing the pin can't open the garage.
+- **Long-press** any pin to open the more-info dialog. Tapping a sensor, an unavailable entity or anything else without a tap action opens more-info too.
+- From the keyboard, Tab to a pin, then Enter or Space taps it, and Shift+Enter or the menu key opens more-info. Screen readers hear the pin's name and state.
 - Sensor pins show the current state with its unit and update live.
 - A pin whose entity doesn't exist shows as a grey question mark, so a renamed entity is easy to spot.
 - A card doesn't download its room until it first scrolls into view, and cards that are off-screen or on a hidden tab stop rendering entirely. Several rooms on one dashboard only cost what you look at.
@@ -122,9 +138,14 @@ pins:
 | `lights[].radius` | `1.0` | Radius of the region the light affects. |
 | `lights[].soft_edge` | `0.5` | Width of the fade at the edge of the region. |
 | `lights[].off_dim` | `0.45` | How bright the region looks when the light is off, from 0 (black) to 1 (unchanged). |
+| `lights[].name` | entity name | Label shown on hover, read by screen readers and shown in the editor. |
+| `lights[].icon` | entity icon | Pin icon, like `mdi:lamp`. |
 | `pins[].entity` | required | Any entity. |
 | `pins[].anchor` | required | Where the pin sits, in capture coordinates. |
-| `pins[].name` | entity name | Label shown on hover and in the editor. |
+| `pins[].name` | entity name | Label shown on hover, read by screen readers and shown in the editor. |
+| `pins[].icon` | entity icon | Pin icon, like `mdi:thermometer`. |
+
+The card rejects options it doesn't know, so a typo like `raduis` is an error instead of being silently ignored. Home Assistant shows a bare "Configuration error" on the dashboard; the message naming the option shows once you edit the dashboard or open the card's editor.
 
 Anchors and the camera are stored in the capture's own coordinates, so re-running the floor tool never moves your pins.
 
@@ -147,9 +168,18 @@ The card explains every failure it knows about:
 - **Could not reach ...** Home Assistant didn't answer. Check the connection and press **Try again**.
 - **... is a 329 MB .ply.** It still loads, but convert it to `.spz` for tablets.
 - **RoomTwin needs WebGL2 ...** The browser or device has no WebGL2, or hardware acceleration is off.
-- **The browser dropped the 3D view to free graphics memory.** Common on phones with many tabs open. Press **Try again**.
+- **The browser dropped the 3D view to free graphics memory.** Common on phones with many tabs open. The card reloads the room by itself the first time; if it happens again within a minute it shows this message and waits for **Try again**.
+- **Configuration error** with no details. Edit the dashboard to see the message, for example **Unknown option "lights[0].raduis"**: a typo, or an option this version doesn't have. Check the spelling against the configuration reference.
+- **Custom element doesn't exist: roomtwin-card.** The browser hasn't loaded the card. Check the resource is added (step 3), then reload the page. On the companion app, clear the frontend cache from its settings.
 - **The room is tilted or upside down.** Use **Set floor (tap 3 points)** in edit mode.
 - **Taps land in the wrong place.** Tap on solid, textured surfaces. Blurry or see-through areas of a capture have too little in them to hit.
+
+## Known limits
+
+- A light region is a sphere, so it also brightens whatever else is inside it, like the wall behind the lamp. There is no relighting.
+- COLMAP captures have no real-world scale, so the "(m)" on the sliders only means metres for Scaniverse captures.
+- While the dashboard's card editor is open, its preview holds a second copy of the room in memory, freed a minute after the dialog closes.
+- The preview in the "Add card" picker points at `/local/roomtwin/room.spz`, which won't exist, so it shows the message explaining where to put the file.
 
 ## Development
 
@@ -162,7 +192,7 @@ npm run build     # writes dist/roomtwin-card.js
 
 The card uses Lit, three.js and [Spark](https://sparkjs.dev) 2.2.0, bundled by Rollup into one file.
 
-To release, tag `v<version>` and attach `dist/roomtwin-card.js` to a GitHub release. HACS installs from the release asset.
+To release, bump `version` in `package.json` and `src/version.ts` (a test keeps them equal), then publish a GitHub release tagged `v<version>`. The release workflow builds the card, attaches `roomtwin-card.js` to the release and runs the HACS check. HACS installs from the release asset.
 
 ## License
 

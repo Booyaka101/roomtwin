@@ -34,6 +34,7 @@ describe("floorFromPoints", () => {
     ["nearly in a line", [[0, 0, 0], [1, 0, 0.01], [3, 0, 0]]],
     ["with two the same", [[1, 0, 1], [1, 0, 1], [3, 0, 0]]],
     ["all the same", [[1, 0, 1], [1, 0, 1], [1, 0, 1]]],
+    ["with two a centimetre apart", [[0, 0, 0], [0.01, 0, 0.001], [3, 0, 2]]],
   ])("rejects points %s", (_, points) => {
     expect(() => floorFromPoints(points as [Vec3, Vec3, Vec3], [0, 1, 0])).toThrow(CollinearError);
   });
@@ -102,6 +103,19 @@ describe("toYaml", () => {
     expect(yaml).toContain("anchor: [0.3, 0, 0]");
     expect(yaml).toContain("radius: 0.3\n");
   });
+
+  test("keys that YAML would misread are quoted, and empty mappings survive", () => {
+    const config = parseConfig({
+      ...full,
+      card_mod: { style: { "#states > div": "padding: 0;", "": "x" } },
+      grid_options: {},
+      visibility: [{}],
+    });
+    const yaml = toYaml(config);
+    expect(yaml).toContain('"#states > div": "padding: 0;"');
+    expect(yaml).toContain("grid_options: {}");
+    expect(parseConfig(parse(yaml))).toEqual(config);
+  });
 });
 
 describe("roomRanges", () => {
@@ -115,6 +129,12 @@ describe("roomRanges", () => {
 
   test("a capture in small units gets finer steps", () => {
     expect(roomRanges(0.4)).toEqual({ step: 0.001, radiusMax: 0.8, softEdgeMax: 0.4, cutMax: 0.48, suggestedCut: 0.36 });
+  });
+
+  test("very large and very small captures get whole or fine steps without float noise", () => {
+    expect(roomRanges(150)).toMatchObject({ step: 1, radiusMax: 300, cutMax: 180 });
+    expect(roomRanges(0.05).step).toBe(0.0001);
+    expect(roomRanges(0.005).step).toBe(0.00001);
   });
 
   test("an empty or flat capture falls back to a normal room", () => {

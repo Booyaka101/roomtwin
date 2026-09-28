@@ -1,16 +1,17 @@
 import { LitElement, css, html, nothing, type PropertyValues } from "lit";
 import * as THREE from "three";
 import { aspectRatio, parseConfig, type RoomTwinConfig, type Vec3 } from "./config";
-import "./editor";
-import type { HelperDetail, RoomTwinEditor } from "./editor";
+import { toYaml, type HelperDetail, type RoomTwinEditor } from "./editor";
 import type { HassEntity, HomeAssistant } from "./hass";
 import { LightRig } from "./lights";
-import { PressGesture, pinLabel, pinState, projectToScreen, tapService } from "./pins";
+import { PressGesture, pinLabel, pinState, projectToScreen, spokenState, tapService } from "./pins";
 import { RoomScene, SplatLoadError, webgl2Available } from "./scene";
+import { VERSION } from "./version";
 
-const VERSION = "0.1.0";
 // Long enough to flip between dashboard views without re-downloading the splat.
 const DISPOSE_AFTER_MS = 60_000;
+// A browser that keeps dropping the 3D view gets the Try again button instead of a reload loop.
+const AUTO_RELOAD_GAP_MS = 60_000;
 const TAP_SLOP_PX = 6;
 const TAP_MAX_MS = 500;
 
@@ -28,14 +29,15 @@ interface StagePin {
   entity: string;
   anchor: Vec3;
   name?: string;
+  icon?: string;
 }
 
 type Status = { kind: "loading"; progress: number } | { kind: "ready" } | { kind: "error"; message: string; retry: boolean };
 
 function stagePins(config: RoomTwinConfig): StagePin[] {
   return [
-    ...config.lights.map((b, index) => ({ kind: "light" as const, index, entity: b.entity, anchor: b.anchor })),
-    ...config.pins.map((b, index) => ({ kind: "pin" as const, index, entity: b.entity, anchor: b.anchor, name: b.name })),
+    ...config.lights.map(({ entity, anchor, name, icon }, index) => ({ kind: "light" as const, index, entity, anchor, name, icon })),
+    ...config.pins.map(({ entity, anchor, name, icon }, index) => ({ kind: "pin" as const, index, entity, anchor, name, icon })),
   ];
 }
 
@@ -67,6 +69,7 @@ export class RoomTwinCard extends LitElement {
   private pins: StagePin[] = [];
   private pressed = -1;
   private pinPointer?: PointerEvent;
+  private lastAutoReload = 0;
   private tapStart?: { x: number; y: number; t: number };
   private readonly tmp = new THREE.Vector3();
   private readonly press = new PressGesture(
@@ -76,6 +79,38 @@ export class RoomTwinCard extends LitElement {
 
   static getStubConfig(): Record<string, unknown> {
     return { splat: "/local/roomtwin/room.spz" };
+  }
+
+  /** HA's visual editor for the plain options. Lights, pins and the view are placed on the card itself. */
+  static getConfigForm() {
+    const labels: Record<string, string> = {
+      splat: "Splat file",
+      aspect_ratio: "Aspect ratio",
+      lod_scale: "Detail",
+      ceiling_cut: "Ceiling cut height",
+    };
+    const helpers: Record<string, string> = {
+      splat: "Like /local/roomtwin/living.spz, for a file in /config/www/roomtwin/",
+      aspect_ratio: "Like 16:9 or 4:3",
+      lod_scale: "Lower is faster on weak tablets, higher is sharper. 1 by default",
+      ceiling_cut: "Hides everything above this height, to look in from above. Easier to set with the pencil button on the card",
+    };
+    return {
+      schema: [
+        { name: "splat", required: true, selector: { text: {} } },
+        {
+          type: "grid",
+          name: "",
+          schema: [
+            { name: "aspect_ratio", selector: { text: {} } },
+            { name: "lod_scale", selector: { number: { min: 0.1, max: 8, step: 0.1, mode: "box" } } },
+          ],
+        },
+        { name: "ceiling_cut", selector: { number: { min: 0, step: 0.01, mode: "box" } } },
+      ],
+      computeLabel: (item: { name: string }) => labels[item.name],
+      computeHelper: (item: { name: string }) => helpers[item.name],
+    };
   }
 
   setConfig(raw: unknown): void {
@@ -95,7 +130,8 @@ export class RoomTwinCard extends LitElement {
     this._hass = hass;
     const config = this.shown;
     if (!config) return;
-    if (!old || stagePins(config).some((p) => old.states[p.entity] !== hass.states[p.entity])) {
+    // The editor looks up any entity, not just the bound ones.
+    if (!old || this._editing || stagePins(config).some((p) => old.states[p.entity] !== hass.states[p.entity])) {
       if (this.lights?.applyStates(hass.states)) this.scene?.requestRender();
       this.requestUpdate();
     }
@@ -133,7 +169,7 @@ export class RoomTwinCard extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     clearTimeout(this.disposeTimer);
-    document.addEventListener("visibilitychange", this.updateActive);
+    document.addEventListener("visibilitychange", this.onVisibility);
     if (this.hasUpdated) {
       this.observe();
       this.requestUpdate();
@@ -142,7 +178,7 @@ export class RoomTwinCard extends LitElement {
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
-    document.removeEventListener("visibilitychange", this.updateActive);
+    document.removeEventListener("visibilitychange", this.onVisibility);
     this.intersection?.disconnect();
     this.resize?.disconnect();
     this.onScreen = false;
@@ -169,25 +205,29 @@ export class RoomTwinCard extends LitElement {
     this.scene?.setActive(this.isConnected && this.onScreen && document.visibilityState === "visible");
   };
 
+  private onVisibility = (): void => {
+    this.updateActive();
+    if (document.visibilityState === "visible") this.requestUpdate();
+  };
+
   private teardown(): void {
     this.abort?.abort();
     this.lights?.dispose();
     this.lights = undefined;
     this.scene?.dispose();
     this.scene = undefined;
+    this.pinPointer = undefined;
     this.loadedKey = "";
     this._status = { kind: "loading", progress: 0 };
   }
 
-  protected firstUpdated(): void {
-    this.observe();
-  }
-
   protected updated(changed: PropertyValues): void {
     super.updated(changed);
+    if (!this.intersection) this.observe();
     const config = this.shown;
-    // Waiting until the card is first on screen keeps a dashboard of rooms from downloading all of them at once.
-    if (config && this.canvasHost && this.onScreen && this.loadedKey !== this.loadKey(config)) void this.load(config);
+    // Waiting until the card is on screen keeps a dashboard of rooms from downloading all of them at once.
+    const visible = this.onScreen && document.visibilityState === "visible";
+    if (config && this.canvasHost && visible && this.loadedKey !== this.loadKey(config)) void this.load(config);
     this.pins = config ? stagePins(config) : [];
     this.pinEls = [...this.renderRoot.querySelectorAll<HTMLElement>(".pin")];
     this.positionPins();
@@ -203,32 +243,39 @@ export class RoomTwinCard extends LitElement {
     }
     const host = this.canvasHost!;
     const abort = (this.abort = new AbortController());
-    const scene = (this.scene = new RoomScene(host));
-    scene.onRender = () => this.positionPins();
-    scene.onContextLost = () => {
-      this.teardown();
-      this.loadedKey = this.loadKey(config);
-      this._status = { kind: "error", message: "The browser dropped the 3D view to free graphics memory.", retry: true };
-    };
-    scene.resize(host.clientWidth, host.clientHeight);
-    this.updateActive();
     this._status = { kind: "loading", progress: 0 };
     try {
+      const scene = (this.scene = new RoomScene(host));
+      scene.onRender = () => this.positionPins();
+      scene.onContextLost = () => this.onContextLost(config);
+      scene.resize(host.clientWidth, host.clientHeight);
+      this.updateActive();
       const result = await scene.load(config.splat, {
         lod: config.lod,
         signal: abort.signal,
         onProgress: (progress) => (this._status = { kind: "loading", progress }),
       });
       this._warning = result.warning ?? "";
+      this.lights = new LightRig(scene.mesh!);
+      this.applyConfig(this.shown ?? config, true);
+      this._status = { kind: "ready" };
     } catch (err) {
       if (abort.signal.aborted) return;
-      const message = err instanceof SplatLoadError ? err.message : `Could not load ${config.splat}: ${(err as Error).message ?? err}`;
+      const message = err instanceof SplatLoadError ? err.message : `Could not load ${config.splat}: ${(err as Error)?.message ?? err}`;
       this._status = { kind: "error", message, retry: true };
+    }
+  }
+
+  /** Phones drop the WebGL context of a backgrounded tab, so reload once the card is visible again. */
+  private onContextLost(config: RoomTwinConfig): void {
+    this.teardown();
+    if (Date.now() - this.lastAutoReload > AUTO_RELOAD_GAP_MS) {
+      this.lastAutoReload = Date.now();
+      this.requestUpdate();
       return;
     }
-    this.lights = new LightRig(scene.mesh!);
-    this.applyConfig(this.shown ?? config, true);
-    this._status = { kind: "ready" };
+    this.loadedKey = this.loadKey(config);
+    this._status = { kind: "error", message: "The browser dropped the 3D view to free graphics memory.", retry: true };
   }
 
   private retry(): void {
@@ -279,8 +326,8 @@ export class RoomTwinCard extends LitElement {
       this.editor?.select(pin.kind, pin.index);
       return;
     }
-    const service = tapService(pin.entity);
-    if (!service || !this._hass?.states[pin.entity]) {
+    const service = tapService(this._hass?.states[pin.entity]);
+    if (!service || !this._hass) {
       this.moreInfo(pin.entity);
       return;
     }
@@ -303,6 +350,12 @@ export class RoomTwinCard extends LitElement {
     this.pinPointer = e;
     this.press.down(e);
   }
+
+  private onPinMove = (e: PointerEvent): void => {
+    // A pinch hands this finger to the orbit controls from where it is now, not where it landed.
+    if (e.pointerId === this.pinPointer?.pointerId) this.pinPointer = e;
+    this.press.move(e);
+  };
 
   private onPinUp = (e: PointerEvent): void => {
     this.pinPointer = undefined;
@@ -331,12 +384,18 @@ export class RoomTwinCard extends LitElement {
     this.pinPointer = undefined;
   }
 
+  /** Enter or Space taps a pin. Shift+Enter or the menu key opens more-info, the keyboard's long-press. */
   private onPinKey(e: KeyboardEvent): void {
-    if (e.key !== "Enter" && e.key !== " ") return;
     const el = (e.target as Element).closest<HTMLElement>(".pin");
-    if (!el) return;
-    e.preventDefault();
-    this.pinTap(this.pins[Number(el.dataset.i)]);
+    const pin = el ? this.pins[Number(el.dataset.i)] : undefined;
+    if (!pin) return;
+    if (e.key === "ContextMenu" || (e.key === "Enter" && e.shiftKey)) {
+      e.preventDefault();
+      this.moreInfo(pin.entity);
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      if (!e.repeat) this.pinTap(pin);
+    }
   }
 
   private onStageDown(e: PointerEvent): void {
@@ -391,16 +450,17 @@ export class RoomTwinCard extends LitElement {
     const label = pinLabel(hass, stateObj);
     const name = pin.name ?? stateObj?.attributes.friendly_name ?? pin.entity;
     const title = stateObj ? name : `${pin.entity} is not in Home Assistant`;
+    const spoken = spokenState(hass, stateObj);
     return html`<div
       class="pin ${state} ${pin.kind}"
       data-i=${i}
       role="button"
       tabindex="0"
       title=${title}
-      aria-label=${label ? `${name}: ${label}` : name}
+      aria-label=${spoken ? `${name}: ${spoken}` : name}
     >
       ${stateObj
-        ? html`<ha-state-icon .hass=${hass} .stateObj=${stateObj}></ha-state-icon>`
+        ? html`<ha-state-icon .hass=${hass} .stateObj=${stateObj} .icon=${pin.icon}></ha-state-icon>`
         : html`<svg viewBox="0 0 24 24" aria-hidden="true"><path d=${MDI_HELP}></path></svg>`}
       ${label ? html`<span class="label">${label}</span>` : nothing}
     </div>`;
@@ -434,7 +494,7 @@ export class RoomTwinCard extends LitElement {
           ? html`<div
               class="pins"
               @pointerdown=${this.onPinDown}
-              @pointermove=${this.press.move}
+              @pointermove=${this.onPinMove}
               @pointerup=${this.onPinUp}
               @pointercancel=${this.onPinCancel}
               @keydown=${this.onPinKey}
@@ -462,7 +522,7 @@ export class RoomTwinCard extends LitElement {
         ? html`<roomtwin-editor
             .hass=${hass}
             .config=${this._draft}
-            .dirty=${this._draft !== this._config}
+            .dirty=${this._draft !== this._config && toYaml(this._draft) !== toYaml(this._config!)}
             .getView=${this.getView}
             .getRoomHeight=${this.getRoomHeight}
             @draft-changed=${this.onDraft}

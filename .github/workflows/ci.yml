@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -21,10 +24,3 @@ jobs:
         with:
           name: roomtwin-card
           path: dist/roomtwin-card.js
-
-  hacs:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: hacs/action@main
-        with:
-          category: plugin

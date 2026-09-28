@@ -1,0 +1,29 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: gh release upload "${{ github.event.release.tag_name }}" dist/roomtwin-card.js --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+      # HACS checks the repo layout and needs a release with the card attached, so it runs last.
+      - uses: hacs/action@main
+        with:
+          category: plugin

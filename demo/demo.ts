@@ -128,9 +128,13 @@ function controls(home: SimHome, stateObj: HassEntity, detailed: boolean) {
 
 const ACTIVE = new Set(["on", "open", "opening", "closing", "unlocked", "playing"]);
 
+function badge(stateObj: HassEntity, icon: string) {
+  return html`<span class="icon ${ACTIVE.has(stateObj.state) ? "active" : ""}">${iconSvg(icon)}</span>`;
+}
+
 function row(home: SimHome, stateObj: HassEntity, icon: string) {
   return html`<li>
-    <span class="icon ${ACTIVE.has(stateObj.state) ? "active" : ""}">${iconSvg(icon)}</span>
+    ${badge(stateObj, icon)}
     <span class="name">${stateObj.attributes.friendly_name}<small>${formatState(stateObj)}</small></span>
     <span class="controls" role="group" aria-label=${String(stateObj.attributes.friendly_name)}>${controls(home, stateObj, false)}</span>
   </li>`;
@@ -185,7 +189,7 @@ function start({ config, states }: DemoFile, slot: HTMLElement): void {
     if (!stateObj) return;
     render(
       html`<header>
-          <span class="icon">${iconSvg(iconOf(stateObj))}</span>
+          ${badge(stateObj, iconOf(stateObj))}
           <h2 id="more-info-title">${stateObj.attributes.friendly_name}</h2>
           <button class="close" aria-label="Close" @click=${() => dialog.close()}>×</button>
         </header>

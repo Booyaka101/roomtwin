@@ -12,8 +12,10 @@ First release.
 - Light bindings darken or tint a soft sphere of the room to follow each light's state, brightness and colour.
 - Optional ceiling cut to look into the room from above.
 - `tap_action`, `hold_action` and `double_tap_action` on any light or pin, with the same actions as Home Assistant's built-in cards.
+- Pins are dark glass pills that pop in when the room appears. An active pin's icon fills with its state colour and glows, an alert pin pulses red, and on narrow cards pins shrink a little.
+- The camera swings into the room as it first appears and glides back when you reset the view. The system's reduce motion setting turns both off, along with the pin animations.
 - CSS variables for the pin size and colours and the background behind the room, for themes and card-mod.
-- Edit mode for admins: tap the room to place lights and pins, tune them with sliders, set the floor from three taps, save the current view as the default, undo step by step, and save straight into the dashboard. On a YAML-mode dashboard, where the card can't save, it copies the result as YAML instead.
+- Edit mode for admins, with the selected light or pin ringed in the room: tap the room to place lights and pins, tune them with sliders, set the floor from three taps, save the current view as the default, undo step by step, and save straight into the dashboard. On a YAML-mode dashboard, where the card can't save, it copies the result as YAML instead.
 - A visual editor in the dashboard's card dialog for the splat file, aspect ratio (with common presets), detail and ceiling cut.
 - Clear messages for a missing file, an unreachable server, an oversized `.ply`, no WebGL2 and a lost graphics context. A lost context reloads the room by itself once a minute at most. Unknown options are rejected by name, so typos don't go unnoticed.
 - Cards load their room when first scrolled into view, and stop rendering while off-screen or on a hidden tab.

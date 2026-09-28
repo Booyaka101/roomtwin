@@ -3,11 +3,11 @@ import { styleMap } from "lit/directives/style-map.js";
 import * as THREE from "three";
 import { aspectRatio, bindingRefs, parseConfig, type BindingRef, type RoomTwinConfig } from "./config";
 import { canSave, dashboardUrlPath, saveCard } from "./dashboard";
-import { toCardConfig, toYaml, type HelperDetail, type RoomTwinEditor } from "./editor";
+import { toCardConfig, toYaml, type HelperDetail, type RoomTwinEditor, type Selection } from "./editor";
 import type { HassEntity, HomeAssistant } from "./hass";
 import { LightRig } from "./lights";
 import { PressGesture, activeColor, pinLabel, pinState, projectToScreen, spokenState, tapService } from "./pins";
-import { RoomScene, SplatLoadError, webgl2Available } from "./scene";
+import { RoomScene, SplatLoadError, webgl2Available, type Motion } from "./scene";
 import { VERSION } from "./version";
 
 // Long enough to flip between dashboard views without re-downloading the splat.
@@ -24,6 +24,8 @@ const TAP_MAX_MS = 500;
 const MDI_PENCIL =
   "M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z";
 const MDI_HOME = "M10,20V14H14V20H19V12H22L12,3L2,12H5V20H10Z";
+const MDI_CUBE_SCAN =
+  "M17,22V20H20V17H22V20.5C22,20.89 21.84,21.24 21.54,21.54C21.24,21.84 20.89,22 20.5,22H17M7,22H3.5C3.11,22 2.76,21.84 2.46,21.54C2.16,21.24 2,20.89 2,20.5V17H4V20H7V22M17,2H20.5C20.89,2 21.24,2.16 21.54,2.46C21.84,2.76 22,3.11 22,3.5V7H20V4H17V2M7,2V4H4V7H2V3.5C2,3.11 2.16,2.76 2.46,2.46C2.76,2.16 3.11,2 3.5,2H7M13,17.25L17,14.95V10.36L13,12.66V17.25M12,10.92L16,8.63L12,6.28L8,8.63L12,10.92M7,14.95L11,17.25V12.66L7,10.36V14.95M18.23,7.59C18.73,7.91 19,8.34 19,8.91V15.23C19,15.8 18.73,16.23 18.23,16.55L12.75,19.73C12.25,20.05 11.75,20.05 11.25,19.73L5.77,16.55C5.27,16.23 5,15.8 5,15.23V8.91C5,8.34 5.27,7.91 5.77,7.59L11.25,4.41C11.5,4.28 11.75,4.22 12,4.22C12.25,4.22 12.5,4.28 12.75,4.41L18.23,7.59Z";
 const MDI_HELP = "M11,18H13V16H11V18M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,6A4,4 0 0,0 8,10H10A2,2 0 0,1 12,8A2,2 0 0,1 14,10C14,12 11,11.75 11,15H13C13,12.75 16,12.5 16,10A4,4 0 0,0 12,6Z";
 
 const NO_WEBGL2 =
@@ -40,6 +42,7 @@ export class RoomTwinCard extends LitElement {
     _status: { state: true },
     _warning: { state: true },
     _hint: { state: true },
+    _selected: { state: true },
   };
 
   /** Set by HA in dashboard edit mode and in the card editor, where HA owns the config being edited. */
@@ -57,6 +60,8 @@ export class RoomTwinCard extends LitElement {
   private _status: Status = { kind: "loading", progress: 0 };
   private _warning = "";
   private _hint = "";
+  // The editor's selection, ringed on the stage.
+  private _selected: Selection | null = null;
   private hintTimer?: ReturnType<typeof setTimeout>;
 
   private scene?: RoomScene;
@@ -129,8 +134,8 @@ export class RoomTwinCard extends LitElement {
     this._editing = false;
     this.scene?.showHelper(null);
     if (this.scene?.mesh && this.loadKey(this._config) === this.loadedKey) {
-      // HA's card editor calls this on every keystroke; only jump the camera when the saved view changed.
-      this.applyConfig(this._config, JSON.stringify(old?.camera) !== JSON.stringify(this._config.camera));
+      // HA's card editor calls this on every keystroke; only move the camera when the saved view changed.
+      this.applyConfig(this._config, JSON.stringify(old?.camera) !== JSON.stringify(this._config.camera) ? "glide" : null);
     }
   }
 
@@ -298,7 +303,7 @@ export class RoomTwinCard extends LitElement {
       });
       this._warning = result.warning ?? "";
       this.lights = new LightRig(scene.mesh!);
-      this.applyConfig(this.shown ?? config, true);
+      this.applyConfig(this.shown ?? config, "enter");
       this._status = { kind: "ready" };
     } catch (err) {
       if (abort.signal.aborted) return;
@@ -324,16 +329,17 @@ export class RoomTwinCard extends LitElement {
     this.requestUpdate();
   }
 
-  private applyConfig(config: RoomTwinConfig, resetView: boolean): void {
+  /** Applies a config to the scene, moving the camera to its saved view with `motion`, or keeping the current view for null. */
+  private applyConfig(config: RoomTwinConfig, motion: Motion | null): void {
     const scene = this.scene;
     if (!scene?.mesh || !this.lights) return;
-    const view = resetView ? config.camera : scene.currentView();
+    const view = motion ? config.camera : scene.currentView();
     scene.setOrientation(config.up, config.floor);
     scene.setCeilingCut(config.ceiling_cut);
     scene.setLodScale(config.lod_scale);
     this.lights.setBindings(config.lights);
     this.lights.applyStates(this._hass?.states ?? {});
-    if (resetView || view) scene.setView(view);
+    scene.setView(view, motion ?? "jump");
     scene.requestRender();
   }
 
@@ -503,24 +509,24 @@ export class RoomTwinCard extends LitElement {
   private openEditor(): void {
     this._draft ??= this._config!;
     this._editing = true;
-    this.applyConfig(this._draft, false);
+    this.applyConfig(this._draft, null);
   }
 
   private closeEditor(): void {
     this._editing = false;
     this.scene?.showHelper(null);
-    this.applyConfig(this._config!, false);
+    this.applyConfig(this._config!, null);
   }
 
   private onDraft(e: CustomEvent<RoomTwinConfig>): void {
     this._draft = e.detail;
-    this.applyConfig(e.detail, false);
+    this.applyConfig(e.detail, null);
   }
 
   private onDiscard(): void {
     this._draft = this._config!;
     this.scene?.showHelper(null);
-    this.applyConfig(this._config!, false);
+    this.applyConfig(this._config!, null);
   }
 
   private saveDraft = async (): Promise<void> => {
@@ -557,6 +563,7 @@ export class RoomTwinCard extends LitElement {
 
   private onHelper(e: CustomEvent<HelperDetail>): void {
     this.scene?.showHelper(e.detail.anchor, e.detail.radius);
+    this._selected = e.detail.selected;
   }
 
   private renderPin(pin: BindingRef, i: number, hass: HomeAssistant) {
@@ -567,20 +574,25 @@ export class RoomTwinCard extends LitElement {
     const title = stateObj ? name : `${pin.entity} is not in Home Assistant`;
     const spoken = spokenState(hass, stateObj);
     const toggles = !pin.tap_action && tapService(stateObj)?.service === "toggle";
+    const selected = this._editing && this._selected?.kind === pin.kind && this._selected.index === pin.index;
     return html`<div
-      class="pin ${state} ${pin.kind}"
+      class="pin ${state} ${pin.kind} ${selected ? "selected" : ""}"
       data-i=${i}
       role="button"
       tabindex="0"
       aria-pressed=${toggles ? String(state === "active") : nothing}
-      style=${styleMap({ "--roomtwin-active": state === "active" && stateObj ? activeColor(stateObj) : undefined })}
+      style=${styleMap({ "--roomtwin-active": state === "active" && stateObj ? activeColor(stateObj) : undefined, "--n": String(i) })}
       title=${title}
       aria-label=${spoken ? `${name}: ${spoken}` : name}
     >
-      ${stateObj
-        ? html`<ha-state-icon .hass=${hass} .stateObj=${stateObj} .icon=${pin.icon}></ha-state-icon>`
-        : html`<svg viewBox="0 0 24 24" aria-hidden="true"><path d=${MDI_HELP}></path></svg>`}
-      ${label ? html`<span class="label">${label}</span>` : nothing}
+      <div class="face">
+        <span class="bubble">
+          ${stateObj
+            ? html`<ha-state-icon .hass=${hass} .stateObj=${stateObj} .icon=${pin.icon}></ha-state-icon>`
+            : html`<svg viewBox="0 0 24 24" aria-hidden="true"><path d=${MDI_HELP}></path></svg>`}
+        </span>
+        ${label ? html`<span class="label">${label}</span>` : nothing}
+      </div>
     </div>`;
   }
 
@@ -590,7 +602,8 @@ export class RoomTwinCard extends LitElement {
     if (status.kind === "loading") {
       const text = status.progress < 1 ? `Loading room ${Math.round(status.progress * 100)}%` : "Preparing room";
       const percent = Math.round(status.progress * 100);
-      return html`<div class="overlay">
+      return html`<div class="overlay loading">
+        <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><path d=${MDI_CUBE_SCAN}></path></svg>
         <div class="bar" role="progressbar" aria-label="Loading room" aria-valuenow=${percent} aria-valuetext=${text}>
           <div style="width: ${percent}%"></div>
         </div>
@@ -610,7 +623,7 @@ export class RoomTwinCard extends LitElement {
     const ready = this._status.kind === "ready";
     return html`<ha-card>
       <div
-        class="stage ${this._editing ? "editing" : ""}"
+        class="stage ${ready ? "ready" : ""} ${this._editing ? "editing" : ""}"
         style="aspect-ratio: ${aspectRatio(config.aspect_ratio)}"
         @wheel=${this.onStageWheel}
       >
@@ -639,7 +652,7 @@ export class RoomTwinCard extends LitElement {
         <div class="hint" role="status">${this._hint}</div>
         ${ready
           ? html`<div class="tools">
-              <button title="Reset view" aria-label="Reset view" @click=${() => this.scene?.setView(config.camera)}>
+              <button title="Reset view" aria-label="Reset view" @click=${() => this.scene?.setView(config.camera, "glide")}>
                 <svg viewBox="0 0 24 24"><path d=${MDI_HOME}></path></svg>
               </button>
               ${hass?.user?.is_admin && !this._editing
@@ -648,6 +661,9 @@ export class RoomTwinCard extends LitElement {
                   </button>`
                 : nothing}
             </div>`
+          : nothing}
+        ${ready && this._editing
+          ? html`<div class="badge"><svg viewBox="0 0 24 24" aria-hidden="true"><path d=${MDI_PENCIL}></path></svg>Editing</div>`
           : nothing}
       </div>
       ${this._warning ? html`<ha-alert alert-type="warning">${this._warning}</ha-alert>` : nothing}
@@ -673,13 +689,30 @@ export class RoomTwinCard extends LitElement {
       overflow: hidden;
     }
     .stage {
+      --glass: rgba(18, 20, 26, 0.55);
       position: relative;
       width: 100%;
-      background: var(--roomtwin-stage-background, #111);
+      container-type: inline-size;
+      background: var(--roomtwin-stage-background, radial-gradient(120% 100% at 50% 30%, #262a31, #111 70%));
     }
     .canvas {
       position: absolute;
       inset: 0;
+      opacity: 0;
+      transition: opacity 0.8s ease;
+    }
+    .ready .canvas {
+      opacity: 1;
+    }
+    /* Keeps the buttons and pins readable over a bright wall. */
+    .canvas::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(to bottom, rgba(0, 0, 0, 0.3), transparent 72px),
+        radial-gradient(130% 100% at 50% 50%, transparent 60%, rgba(0, 0, 0, 0.3));
     }
     /* OrbitControls sets touch-action none inline. Outside edit mode a vertical swipe scrolls the dashboard. */
     .canvas canvas {
@@ -688,18 +721,33 @@ export class RoomTwinCard extends LitElement {
     .editing .canvas canvas {
       touch-action: none !important;
     }
+    .face,
+    .hint,
+    .badge,
+    .tools button {
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: var(--glass);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+      color: #fff;
+    }
+    /* Not on pins: a stress room with two dozen of them lost about a tenth of its frame rate to the blur. */
+    .hint,
+    .badge,
+    .tools button {
+      -webkit-backdrop-filter: blur(10px) saturate(1.4);
+      backdrop-filter: blur(10px) saturate(1.4);
+    }
     .hint {
       position: absolute;
       left: 50%;
-      bottom: 12px;
+      bottom: 14px;
       transform: translateX(-50%);
-      padding: 6px 12px;
-      border-radius: 16px;
-      background: rgba(0, 0, 0, 0.7);
-      color: #fff;
+      padding: 7px 14px;
+      border-radius: 18px;
       font-size: 13px;
       white-space: nowrap;
       pointer-events: none;
+      transition: opacity 0.2s;
     }
     .hint:empty {
       opacity: 0;
@@ -712,23 +760,11 @@ export class RoomTwinCard extends LitElement {
       isolation: isolate;
     }
     .pin {
+      --size: var(--roomtwin-pin-size, 36px);
       position: absolute;
       left: 0;
       top: 0;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      box-sizing: border-box;
-      min-width: var(--roomtwin-pin-size, 36px);
-      height: var(--roomtwin-pin-size, 36px);
-      padding: 0 6px;
-      justify-content: center;
-      border-radius: calc(var(--roomtwin-pin-size, 36px) / 2);
-      background: var(--roomtwin-pin-background, rgba(0, 0, 0, 0.55));
-      color: var(--roomtwin-pin-text-color, #fff);
-      font-size: 13px;
-      font-weight: 500;
-      white-space: nowrap;
+      outline: none;
       pointer-events: auto;
       cursor: pointer;
       touch-action: none;
@@ -736,24 +772,99 @@ export class RoomTwinCard extends LitElement {
       -webkit-user-select: none;
       -webkit-touch-callout: none;
       will-change: transform;
-      --mdc-icon-size: calc(var(--roomtwin-pin-size, 36px) * 5 / 9);
+      --mdc-icon-size: calc(var(--size) * 5 / 9);
     }
-    .pin.active {
+    .pin:hover,
+    .pin:focus-visible {
+      z-index: 1000000 !important;
+    }
+    .face {
+      position: relative;
+      display: flex;
+      align-items: center;
+      box-sizing: border-box;
+      min-width: var(--size);
+      height: var(--size);
+      padding: 3px;
+      border-radius: calc(var(--size) / 2);
+      background: var(--roomtwin-pin-background, rgba(18, 20, 26, 0.75));
+      color: var(--roomtwin-pin-text-color, #fff);
+      font-size: 13px;
+      font-weight: 500;
+      white-space: nowrap;
+      transition:
+        transform 0.15s ease,
+        border-color 0.3s,
+        box-shadow 0.3s;
+      animation: pin-in 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.25) backwards;
+      animation-delay: calc(min(var(--n), 12) * 40ms + 150ms);
+    }
+    .bubble {
+      flex: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: calc(var(--size) - 8px);
+      height: calc(var(--size) - 8px);
+      border-radius: 50%;
+      transition:
+        background-color 0.3s,
+        color 0.3s,
+        box-shadow 0.3s;
+    }
+    .label {
+      padding: 0 9px 0 3px;
+    }
+    @media (hover: hover) {
+      .pin:hover .face {
+        transform: scale(1.08);
+      }
+    }
+    .pin:active .face {
+      transform: scale(0.94);
+    }
+    .pin:focus-visible .face {
+      outline: 2px solid var(--primary-color, #03a9f4);
+      outline-offset: 2px;
+    }
+    .pin.active .face {
+      border-color: color-mix(in srgb, var(--roomtwin-active) 60%, transparent);
+      box-shadow:
+        0 4px 14px rgba(0, 0, 0, 0.35),
+        0 0 18px color-mix(in srgb, var(--roomtwin-active) 45%, transparent);
+    }
+    .pin.active .bubble {
       background: var(--roomtwin-active);
-      color: #000;
+      color: rgba(0, 0, 0, 0.87);
+      box-shadow: 0 0 10px color-mix(in srgb, var(--roomtwin-active) 70%, transparent);
     }
-    .pin.alert {
-      /* Darkened so white text passes WCAG AA on HA's default red. */
+    .pin.alert .face {
+      border-color: var(--error-color, #db4437);
+    }
+    .pin.alert .bubble {
+      /* Darkened so the white icon passes WCAG AA on HA's default red. */
       background: color-mix(in srgb, var(--error-color, #db4437) 85%, black);
       color: #fff;
     }
-    .pin.missing,
-    .pin.unavailable {
-      background: rgba(110, 110, 110, 0.7);
-      color: #ddd;
+    .pin.alert .face::after {
+      content: "";
+      position: absolute;
+      inset: -1px;
+      border-radius: inherit;
+      border: 2px solid var(--error-color, #db4437);
+      pointer-events: none;
+      animation: ring 1.8s ease-out infinite;
     }
-    .pin:focus-visible {
-      outline: 2px solid var(--primary-color);
+    .pin.selected .face {
+      outline: 2px solid var(--primary-color, #03a9f4);
+      outline-offset: 3px;
+      transform: scale(1.1);
+    }
+    .pin.missing .face,
+    .pin.unavailable .face {
+      border-style: dashed;
+      border-color: rgba(255, 255, 255, 0.4);
+      color: rgba(255, 255, 255, 0.7);
     }
     .pin svg {
       width: var(--mdc-icon-size);
@@ -767,57 +878,174 @@ export class RoomTwinCard extends LitElement {
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 12px;
+      gap: 14px;
       padding: 16px;
-      color: #eee;
+      color: rgba(255, 255, 255, 0.85);
       text-align: center;
+    }
+    .overlay span {
+      font-size: 13px;
+      letter-spacing: 0.02em;
+      font-variant-numeric: tabular-nums;
     }
     .overlay ha-alert {
       max-width: 520px;
       text-align: left;
     }
+    .glyph {
+      width: 44px;
+      height: 44px;
+      fill: var(--primary-color, #03a9f4);
+      filter: drop-shadow(0 0 12px color-mix(in srgb, var(--primary-color, #03a9f4) 60%, transparent));
+      animation: float 2.4s ease-in-out infinite;
+    }
     .bar {
-      width: min(240px, 60%);
-      height: 4px;
-      border-radius: 2px;
-      background: rgba(255, 255, 255, 0.2);
+      width: min(260px, 60%);
+      height: 6px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.12);
       overflow: hidden;
     }
     .bar > div {
+      position: relative;
       height: 100%;
+      overflow: hidden;
+      border-radius: inherit;
       background: var(--primary-color, #03a9f4);
+      background: linear-gradient(90deg, color-mix(in srgb, var(--primary-color, #03a9f4) 55%, white), var(--primary-color, #03a9f4));
+      transition: width 0.3s ease;
+    }
+    .bar > div::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent);
+      transform: translateX(-100%);
+      animation: shimmer 1.4s linear infinite;
+    }
+    .retry {
+      font: inherit;
+      padding: 8px 18px;
+      border: none;
+      border-radius: 18px;
+      background: var(--primary-color, #03a9f4);
+      color: var(--text-primary-color, #fff);
+      cursor: pointer;
     }
     .tools {
       position: absolute;
-      top: 8px;
-      right: 8px;
+      top: 10px;
+      right: 10px;
       display: flex;
       gap: 8px;
+      animation: fade-in 0.4s ease 0.3s backwards;
     }
-    .tools button,
-    .retry {
+    .tools button {
       display: flex;
       align-items: center;
       justify-content: center;
-      border: none;
-      color: #fff;
-      background: rgba(0, 0, 0, 0.5);
-      cursor: pointer;
-    }
-    .tools button {
       width: 40px;
       height: 40px;
+      padding: 0;
       border-radius: 50%;
+      cursor: pointer;
+      transition:
+        background-color 0.2s,
+        transform 0.15s;
+    }
+    .tools button:hover {
+      background: rgba(18, 20, 26, 0.8);
+    }
+    .tools button:active {
+      transform: scale(0.92);
+    }
+    .tools button:focus-visible,
+    .retry:focus-visible {
+      outline: 2px solid var(--primary-color, #03a9f4);
+      outline-offset: 2px;
     }
     .tools svg {
       width: 22px;
       height: 22px;
       fill: currentColor;
     }
-    .retry {
-      font: inherit;
-      padding: 8px 16px;
-      border-radius: 18px;
+    .badge {
+      position: absolute;
+      top: 14px;
+      left: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      height: 32px;
+      box-sizing: border-box;
+      padding: 0 12px 0 10px;
+      border-radius: 16px;
+      font-size: 13px;
+      font-weight: 500;
+      pointer-events: none;
+      animation: fade-in 0.3s ease;
+    }
+    .badge svg {
+      width: 16px;
+      height: 16px;
+      fill: var(--primary-color, #03a9f4);
+    }
+    @container (max-width: 520px) {
+      .pin {
+        --size: var(--roomtwin-pin-size, 32px);
+      }
+      .face {
+        font-size: 12px;
+      }
+    }
+    @keyframes pin-in {
+      from {
+        opacity: 0;
+        transform: translateY(8px) scale(0.3);
+      }
+    }
+    @keyframes ring {
+      from {
+        opacity: 0.9;
+      }
+      to {
+        opacity: 0;
+        transform: scale(1.6);
+      }
+    }
+    @keyframes float {
+      50% {
+        opacity: 0.6;
+        transform: translateY(-5px);
+      }
+    }
+    @keyframes shimmer {
+      to {
+        transform: translateX(100%);
+      }
+    }
+    @keyframes fade-in {
+      from {
+        opacity: 0;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .face,
+      .glyph,
+      .tools,
+      .badge,
+      .bar > div::after {
+        animation: none;
+      }
+      .pin.alert .face::after {
+        animation: none;
+        opacity: 0.9;
+      }
+      .canvas,
+      .face,
+      .tools button {
+        transition: none;
+      }
     }
   `;
 }

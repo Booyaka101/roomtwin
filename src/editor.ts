@@ -6,6 +6,11 @@ import { domainOf, type HomeAssistant } from "./hass";
 
 export class CollinearError extends Error {}
 
+const MDI_LIGHTBULB =
+  "M12,2A7,7 0 0,0 5,9C5,11.38 6.19,13.47 8,14.74V17A1,1 0 0,0 9,18H15A1,1 0 0,0 16,17V14.74C17.81,13.47 19,11.38 19,9A7,7 0 0,0 12,2M9,21A1,1 0 0,0 10,22H14A1,1 0 0,0 15,21V20H9V21Z";
+const MDI_MAP_MARKER =
+  "M12,11.5A2.5,2.5 0 0,1 9.5,9A2.5,2.5 0 0,1 12,6.5A2.5,2.5 0 0,1 14.5,9A2.5,2.5 0 0,1 12,11.5M12,2A7,7 0 0,0 5,9C5,14.25 12,22 12,22C12,22 19,14.25 19,9A7,7 0 0,0 12,2Z";
+
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
@@ -180,11 +185,12 @@ export async function copyText(text: string): Promise<boolean> {
 
 export const LIGHT_DOMAINS = new Set(["light", "switch"]);
 
-type Selection = { kind: "light" | "pin"; index: number };
+export type Selection = { kind: "light" | "pin"; index: number };
 
 export interface HelperDetail {
   anchor: Vec3 | null;
   radius: number;
+  selected: Selection | null;
 }
 
 /**
@@ -288,10 +294,10 @@ export class RoomTwinEditor extends LitElement {
   }
 
   private helper(): HelperDetail {
-    if (this._pending) return { anchor: this._pending, radius: 0 };
+    if (this._pending) return { anchor: this._pending, radius: 0, selected: null };
     const binding = this.selectedBinding();
-    if (!binding) return { anchor: null, radius: 0 };
-    return { anchor: binding.anchor, radius: "radius" in binding ? binding.radius : 0 };
+    if (!binding) return { anchor: null, radius: 0, selected: null };
+    return { anchor: binding.anchor, radius: "radius" in binding ? binding.radius : 0, selected: this._selected };
   }
 
   private selectedBinding(): LightBinding | PinBinding | undefined {
@@ -515,17 +521,20 @@ export class RoomTwinEditor extends LitElement {
         ${this.renderTask()} ${this._message ? html`<p class="note" role="status">${this._message}</p>` : nothing}
       </section>
       ${bindings.length
-        ? html`<section class="chips">
+        ? html`<h3>In this room</h3>
+          <section class="chips">
             ${bindings.map(
               (b) => html`<button
                 class=${this._selected?.kind === b.kind && this._selected.index === b.index ? "chip selected" : "chip"}
                 @click=${() => this.select(b.kind, b.index)}
               >
-                ${b.kind === "light" ? "💡" : "📍"} ${b.name ?? this.hass.states[b.entity]?.attributes.friendly_name ?? b.entity}
+                <svg class=${b.kind} viewBox="0 0 24 24" aria-hidden="true"><path d=${b.kind === "light" ? MDI_LIGHTBULB : MDI_MAP_MARKER}></path></svg>
+                ${b.name ?? this.hass.states[b.entity]?.attributes.friendly_name ?? b.entity}
               </button>`,
             )}
           </section>`
         : nothing}
+      <h3>Room</h3>
       <section class="room">
         <label class="slider">
           <span><input type="checkbox" .checked=${cut !== undefined} @change=${(e: Event) =>
@@ -572,15 +581,31 @@ export class RoomTwinEditor extends LitElement {
   static styles = css`
     :host {
       display: block;
-      padding: 8px 16px 16px;
+      padding: 12px 16px 16px;
       font-size: 14px;
       color: var(--primary-text-color);
+      --accent: var(--primary-color, #03a9f4);
     }
     section {
       margin: 8px 0;
     }
     p {
       margin: 4px 0;
+    }
+    h3 {
+      margin: 16px 0 6px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--secondary-text-color);
+    }
+    .task {
+      margin-top: 0;
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+      background: color-mix(in srgb, var(--accent) 8%, transparent);
     }
     .note {
       color: var(--secondary-text-color);
@@ -597,21 +622,34 @@ export class RoomTwinEditor extends LitElement {
     button {
       font: inherit;
       min-height: 36px;
-      padding: 0 12px;
+      padding: 0 14px;
       border-radius: 18px;
       border: 1px solid var(--divider-color, #ccc);
       background: var(--card-background-color, #fff);
       color: var(--primary-text-color);
       cursor: pointer;
+      transition:
+        background-color 0.15s,
+        border-color 0.15s;
+    }
+    button:hover:not(:disabled) {
+      border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+      background: color-mix(in srgb, var(--accent) 10%, var(--card-background-color, #fff));
+    }
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }
     button:disabled {
       opacity: 0.4;
       cursor: default;
     }
     button.primary,
-    .chip.selected {
-      background: var(--primary-color);
-      border-color: var(--primary-color);
+    .chip.selected,
+    button.primary:hover:not(:disabled),
+    .chip.selected:hover {
+      background: var(--accent);
+      border-color: var(--accent);
       color: var(--text-primary-color, #fff);
     }
     button.danger {
@@ -621,6 +659,25 @@ export class RoomTwinEditor extends LitElement {
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
+      margin-top: 0;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 12px 0 8px;
+    }
+    .chip svg {
+      width: 18px;
+      height: 18px;
+      flex: none;
+      fill: var(--accent);
+    }
+    .chip svg.light {
+      fill: var(--state-light-active-color, #ffc107);
+    }
+    .chip.selected svg {
+      fill: currentColor;
     }
     .slider {
       display: grid;
@@ -632,23 +689,51 @@ export class RoomTwinEditor extends LitElement {
     .slider output {
       text-align: right;
       font-variant-numeric: tabular-nums;
+      color: var(--secondary-text-color);
+    }
+    input[type="range"],
+    input[type="checkbox"] {
+      accent-color: var(--accent);
     }
     input.entity,
     .slider input:not([type]) {
       font: inherit;
-      padding: 6px 8px;
-      border-radius: 4px;
+      padding: 7px 10px;
+      border-radius: 8px;
       border: 1px solid var(--divider-color, #ccc);
       background: var(--card-background-color, #fff);
       color: var(--primary-text-color);
+    }
+    input.entity:focus,
+    .slider input:not([type]):focus {
+      outline: none;
+      border-color: var(--accent);
     }
     input.entity {
       width: 100%;
       box-sizing: border-box;
     }
+    .footer {
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid var(--divider-color, #ccc);
+    }
+    details {
+      margin-top: 8px;
+    }
+    summary {
+      cursor: pointer;
+      color: var(--secondary-text-color);
+    }
     textarea {
       width: 100%;
       box-sizing: border-box;
+      margin-top: 6px;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid var(--divider-color, #ccc);
+      background: var(--secondary-background-color, transparent);
+      color: var(--primary-text-color);
       font-family: var(--code-font-family, monospace);
       font-size: 12px;
     }

@@ -12,45 +12,72 @@
       :root {
         color-scheme: dark;
         --primary-color: #03a9f4;
-        --primary-text-color: #e1e1e1;
-        --secondary-text-color: #9b9b9b;
-        --divider-color: rgba(225, 225, 225, 0.12);
+        --primary-text-color: #e8e8ea;
+        --secondary-text-color: #a3a7ae;
+        --divider-color: rgba(225, 225, 225, 0.1);
         --card-background-color: #1c1c1c;
         --text-primary-color: #ffffff;
         --error-color: #db4437;
         --state-light-active-color: #ffc107;
         --code-font-family: ui-monospace, Consolas, monospace;
+        --glass: rgba(26, 28, 34, 0.62);
+        --glass-edge: rgba(255, 255, 255, 0.08);
         font-family: Roboto, system-ui, -apple-system, "Segoe UI", sans-serif;
-        background: #111111;
+        background: #0d0e11;
         color: var(--primary-text-color);
       }
-      body { margin: 0; }
-      main { max-width: 1280px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 300px; align-items: start; }
-      header.intro { grid-column: 1 / -1; }
-      h1 { font-size: 1.5rem; margin: 0 0 6px; font-weight: 500; }
-      .intro p { margin: 4px 0; color: var(--secondary-text-color); line-height: 1.5; max-width: 72ch; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(900px 520px at 12% -8%, rgba(255, 160, 70, 0.14), transparent 70%),
+          radial-gradient(760px 480px at 100% 4%, rgba(3, 169, 244, 0.12), transparent 70%);
+      }
       a { color: var(--primary-color); }
-      #card { min-height: 200px; }
-      aside { background: var(--card-background-color); border-radius: 12px; padding: 12px 14px; }
-      aside h2 { font-size: 1rem; font-weight: 500; margin: 0 0 2px; }
-      aside > p { margin: 0 0 8px; font-size: 0.85rem; color: var(--secondary-text-color); }
-      ul { list-style: none; margin: 0; padding: 0; }
-      li { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--divider-color); }
-      .icon { flex: none; width: 24px; height: 24px; color: var(--secondary-text-color); }
-      .icon.active { color: var(--state-light-active-color); }
-      .icon svg { width: 24px; height: 24px; fill: currentColor; display: block; }
+      .wrap { max-width: 1280px; margin: 0 auto; padding: 0 20px; }
+      .top { display: flex; align-items: center; gap: 10px; padding-top: 18px; }
+      .brand { display: flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; font-weight: 600; font-size: 1.05rem; letter-spacing: 0.01em; }
+      .brand svg { width: 26px; height: 26px; fill: var(--primary-color); filter: drop-shadow(0 0 8px rgba(3, 169, 244, 0.5)); }
+      .tag { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--primary-color); border: 1px solid rgba(3, 169, 244, 0.4); border-radius: 10px; padding: 2px 8px; }
+      .top .gh { margin-left: auto; color: var(--secondary-text-color); text-decoration: none; font-size: 0.9rem; }
+      .top .gh:hover { color: var(--primary-text-color); }
+      .hero { padding: 36px 0 18px; max-width: 760px; }
+      h1 { font-size: clamp(1.8rem, 4.4vw, 2.9rem); line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 14px; }
+      h1 span { background: linear-gradient(90deg, #ffc46b, #ff8a5c 45%, #4fc3f7); -webkit-background-clip: text; background-clip: text; color: transparent; }
+      .lede { font-size: 1.08rem; line-height: 1.55; margin: 0 0 10px; color: #c9ccd2; }
+      .note { font-size: 0.9rem; line-height: 1.5; margin: 0; color: var(--secondary-text-color); }
+      .gestures { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 18px; padding: 0; list-style: none; }
+      .gestures li { font-size: 0.85rem; color: var(--secondary-text-color); background: var(--glass); border: 1px solid var(--glass-edge); border-radius: 16px; padding: 6px 12px; }
+      .gestures b { color: var(--primary-text-color); font-weight: 600; }
+      main { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr) 300px; align-items: start; }
+      #card { min-height: 200px; color: var(--secondary-text-color); }
+      #card roomtwin-card { display: block; border-radius: 12px; box-shadow: 0 0 0 1px var(--glass-edge), 0 30px 60px -20px rgba(0, 0, 0, 0.8), 0 0 90px -24px rgba(255, 160, 70, 0.4); }
+      aside { background: var(--glass); border: 1px solid var(--glass-edge); border-radius: 16px; padding: 14px 16px; -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
+      aside h2 { font-size: 1rem; font-weight: 600; margin: 0 0 2px; }
+      aside > p { margin: 0 0 10px; font-size: 0.85rem; color: var(--secondary-text-color); }
+      aside ul { list-style: none; margin: 0; padding: 0; }
+      aside li { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--divider-color); }
+      .icon { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: rgba(255, 255, 255, 0.06); color: var(--secondary-text-color); transition: background-color 0.3s, color 0.3s; }
+      .icon.active { color: var(--state-light-active-color); background: rgba(255, 193, 7, 0.16); }
+      .icon svg { width: 20px; height: 20px; fill: currentColor; display: block; }
       .name { flex: 1; min-width: 0; font-size: 0.9rem; }
       .name small { display: block; color: var(--secondary-text-color); font-size: 0.8rem; }
-      button { font: inherit; font-size: 0.85rem; color: var(--primary-color); background: transparent; border: 1px solid var(--divider-color); border-radius: 18px; padding: 5px 12px; cursor: pointer; }
-      button:hover { background: rgba(3, 169, 244, 0.1); }
+      button { font: inherit; font-size: 0.85rem; color: var(--primary-color); background: transparent; border: 1px solid var(--divider-color); border-radius: 18px; padding: 5px 12px; cursor: pointer; transition: background-color 0.15s; }
+      button:hover { background: rgba(3, 169, 244, 0.12); }
       button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
       button.on { background: var(--primary-color); color: var(--text-primary-color); border-color: transparent; }
-      dialog { background: var(--card-background-color); color: var(--primary-text-color); border: none; border-radius: 16px; width: min(360px, calc(100vw - 32px)); padding: 16px 20px 20px; }
-      dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+      .outro { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin: 28px 0 40px; padding: 18px 20px; border-radius: 16px; background: var(--glass); border: 1px solid var(--glass-edge); }
+      .outro p { flex: 1 1 320px; margin: 0; color: var(--secondary-text-color); line-height: 1.5; }
+      .outro strong { color: var(--primary-text-color); }
+      .cta { display: inline-block; padding: 10px 18px; border-radius: 20px; background: var(--primary-color); color: #fff; font-weight: 600; text-decoration: none; box-shadow: 0 6px 20px -6px rgba(3, 169, 244, 0.7); }
+      .cta:hover { filter: brightness(1.1); }
+      dialog { background: #1d1f24; color: var(--primary-text-color); border: 1px solid var(--glass-edge); border-radius: 20px; width: min(360px, calc(100vw - 32px)); padding: 16px 20px 20px; box-shadow: 0 30px 80px -10px rgba(0, 0, 0, 0.8); }
+      dialog[open] { animation: rise 0.22s ease-out; }
+      dialog::backdrop { background: rgba(5, 6, 8, 0.55); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
       dialog header { display: flex; align-items: center; gap: 12px; }
-      dialog h2 { flex: 1; font-size: 1.15rem; font-weight: 500; margin: 0; }
+      dialog h2 { flex: 1; font-size: 1.15rem; font-weight: 600; margin: 0; }
       dialog .close { border: none; font-size: 1.4rem; line-height: 1; padding: 4px 10px; color: var(--secondary-text-color); }
-      dialog .state { font-size: 1.6rem; margin: 18px 0; }
+      dialog .state { font-size: 1.8rem; font-weight: 300; margin: 18px 0; }
       dialog .controls { display: grid; gap: 14px; justify-items: start; }
       dialog .entity { margin: 18px 0 0; font-family: var(--code-font-family); font-size: 0.8rem; color: var(--secondary-text-color); }
       .slider { display: grid; gap: 6px; width: 100%; font-size: 0.85rem; color: var(--secondary-text-color); }
@@ -58,38 +85,59 @@
       .swatches { display: flex; gap: 10px; }
       .swatches button { width: 44px; height: 44px; padding: 0; border-radius: 50%; border: 2px solid var(--divider-color); }
       .swatches button[aria-pressed="true"] { border-color: var(--primary-text-color); }
-      #toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 120px); background: #323232; color: #fff; padding: 12px 18px; border-radius: 6px; max-width: calc(100vw - 48px); transition: transform 0.2s; font-size: 0.9rem; }
+      #toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 120px); background: rgba(40, 42, 48, 0.85); border: 1px solid var(--glass-edge); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); color: #fff; padding: 12px 18px; border-radius: 22px; max-width: calc(100vw - 48px); transition: transform 0.25s; font-size: 0.9rem; }
       #toast.shown { transform: translate(-50%, 0); }
+      @keyframes rise { from { opacity: 0; transform: translateY(12px) scale(0.97); } }
       @media (max-width: 860px) {
-        main { grid-template-columns: minmax(0, 1fr); padding: 10px; }
+        .wrap { padding: 0 12px; }
+        .hero { padding: 24px 0 14px; }
+        .lede { font-size: 1rem; }
+        main { grid-template-columns: minmax(0, 1fr); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        dialog[open] { animation: none; }
+        #toast, .icon, button { transition: none; }
       }
     </style>
   </head>
   <body>
-    <main>
-      <header class="intro">
-        <h1>RoomTwin</h1>
-        <p>
-          This is the real <a href="https://github.com/Booyaka101/roomtwin">RoomTwin</a> Home Assistant card, running on a
-          scan of a real room. The home behind it is simulated in your browser, so nothing here controls actual devices.
-        </p>
-        <p>
-          Tap a light to switch it and watch its part of the room change. Press and hold a pin for its details and colour
-          controls. Drag to look around, pinch or hold Ctrl and scroll to zoom. The pencil opens the editor you'd use to place pins in
-          your own room. Changes aren't saved anywhere.
-        </p>
-        <p>
-          Want it for your own rooms? The <a href="https://github.com/Booyaka101/roomtwin#readme">README</a> covers scanning a
-          room and installing the card with HACS.
-        </p>
+    <div class="wrap">
+      <header class="top">
+        <a class="brand" href="https://github.com/Booyaka101/roomtwin"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17,22V20H20V17H22V20.5C22,20.89 21.84,21.24 21.54,21.54C21.24,21.84 20.89,22 20.5,22H17M7,22H3.5C3.11,22 2.76,21.84 2.46,21.54C2.16,21.24 2,20.89 2,20.5V17H4V20H7V22M17,2H20.5C20.89,2 21.24,2.16 21.54,2.46C21.84,2.76 22,3.11 22,3.5V7H20V4H17V2M7,2V4H4V7H2V3.5C2,3.11 2.16,2.76 2.46,2.46C2.76,2.16 3.11,2 3.5,2H7M13,17.25L17,14.95V10.36L13,12.66V17.25M12,10.92L16,8.63L12,6.28L8,8.63L12,10.92M7,14.95L11,17.25V12.66L7,10.36V14.95M18.23,7.59C18.73,7.91 19,8.34 19,8.91V15.23C19,15.8 18.73,16.23 18.23,16.55L12.75,19.73C12.25,20.05 11.75,20.05 11.25,19.73L5.77,16.55C5.27,16.23 5,15.8 5,15.23V8.91C5,8.34 5.27,7.91 5.77,7.59L11.25,4.41C11.5,4.28 11.75,4.22 12,4.22C12.25,4.22 12.5,4.28 12.75,4.41L18.23,7.59Z"></path></svg>RoomTwin</a>
+        <span class="tag">Live demo</span>
+        <a class="gh" href="https://github.com/Booyaka101/roomtwin">GitHub</a>
       </header>
-      <div id="card">Loading the room…</div>
-      <aside>
-        <h2>The simulated home</h2>
-        <p>Flip these like the real devices would, and the card follows.</p>
-        <ul id="home-list"></ul>
-      </aside>
-    </main>
+      <section class="hero">
+        <h1>Your room, in 3D, <span>on your dashboard.</span></h1>
+        <p class="lede">
+          A Home Assistant card that shows a scan of your actual room with every light and sensor pinned where it really is.
+          Tap the lamp and the lamp turns on, and that part of the room brightens with it.
+        </p>
+        <p class="note">
+          This is the real card running on a scan of a real playroom. The home behind it is simulated in your browser, so nothing
+          here controls actual devices and nothing you change is saved.
+        </p>
+      </section>
+      <ul class="gestures" aria-label="Things to try">
+        <li><b>Tap</b> a light to switch it</li>
+        <li><b>Hold</b> a pin for its details</li>
+        <li><b>Drag</b> to look around</li>
+        <li><b>Pinch</b> or Ctrl and scroll to zoom</li>
+        <li>The <b>pencil</b> opens the editor</li>
+      </ul>
+      <main>
+        <div id="card">Loading the room…</div>
+        <aside>
+          <h2>The simulated home</h2>
+          <p>Flip these like the real devices would, and the card follows.</p>
+          <ul id="home-list"></ul>
+        </aside>
+      </main>
+      <footer class="outro">
+        <p><strong>Want it for your own rooms?</strong> Scan a room with your phone, install the card with HACS, and place your pins in the editor you just tried.</p>
+        <a class="cta" href="https://github.com/Booyaka101/roomtwin#readme">Set it up</a>
+      </footer>
+    </div>
     <dialog id="more-info" aria-labelledby="more-info-title"></dialog>
     <div id="toast" role="status" aria-live="polite"></div>
     <script type="module" src="demo.js"></script>

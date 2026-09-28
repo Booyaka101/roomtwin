@@ -167,10 +167,10 @@ A theme can set these, or card-mod on a single card:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `--roomtwin-pin-size` | `36px` | Height of a pin. The icon scales with it. |
-| `--roomtwin-pin-background` | `rgba(0, 0, 0, 0.55)` | Background of a pin that is off or idle. |
-| `--roomtwin-pin-text-color` | `#fff` | Icon and label colour on those pins. |
-| `--roomtwin-stage-background` | `#111` | What shows behind the room while it loads and around its edges. |
+| `--roomtwin-pin-size` | `36px`, `32px` on cards narrower than 520px | Height of a pin. The icon scales with it. |
+| `--roomtwin-pin-background` | `rgba(18, 20, 26, 0.75)` | Background of the pin, around its icon. |
+| `--roomtwin-pin-text-color` | `#fff` | Label colour, and the icon colour on pins that are off or idle. |
+| `--roomtwin-stage-background` | `radial-gradient(120% 100% at 50% 30%, #262a31, #111 70%)` | What shows behind the room while it loads and around its edges. |
 
 Active pins use Home Assistant's own state colours, like `--state-cover-open-color` or `--state-active-color`, so a theme that sets those changes the pins too. In a theme file the names go without the leading dashes:
 
@@ -179,6 +179,8 @@ my_theme:
   roomtwin-pin-size: 44px
   roomtwin-pin-background: "rgba(20, 20, 40, 0.7)"
 ```
+
+With the system's reduce motion setting on, the card skips the camera moves and the pin animations.
 
 ### How lights change the room
 

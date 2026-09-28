@@ -8,8 +8,48 @@ const MIN_RAYCAST_OPACITY = 0.2;
 const PICK_RINGS_PX = [0, 4, 8, 14];
 const Y_UP = new THREE.Vector3(0, 1, 0);
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
+const ENTER_MS = 1600;
+const GLIDE_MS = 700;
 
 export class SplatLoadError extends Error {}
+
+/** How setView gets there: straight away, a glide from the current view, or a swing in as the room first appears. */
+export type Motion = "jump" | "glide" | "enter";
+
+const easeOut = (t: number) => 1 - (1 - t) ** 3;
+const easeInOut = (t: number) => (t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2);
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+/** A camera move that orbits around a target sliding from one view's to the other's, so it swings rather than cuts through the room. */
+export class Flight {
+  private readonly from: THREE.Spherical;
+  private readonly to: THREE.Spherical;
+  private readonly orbit = new THREE.Spherical();
+
+  constructor(
+    fromPosition: THREE.Vector3,
+    private readonly fromTarget: THREE.Vector3,
+    toPosition: THREE.Vector3,
+    private readonly toTarget: THREE.Vector3,
+    readonly ms: number,
+    private readonly ease: (t: number) => number,
+  ) {
+    this.from = new THREE.Spherical().setFromVector3(fromPosition.clone().sub(fromTarget));
+    this.to = new THREE.Spherical().setFromVector3(toPosition.clone().sub(toTarget));
+    // The short way round.
+    this.from.theta += Math.round((this.to.theta - this.from.theta) / (2 * Math.PI)) * 2 * Math.PI;
+  }
+
+  /** Poses the camera `elapsed` ms in and says whether the move is over. */
+  pose(elapsed: number, position: THREE.Vector3, target: THREE.Vector3): boolean {
+    const t = Math.min(1, Math.max(0, elapsed / this.ms));
+    const e = this.ease(t);
+    target.lerpVectors(this.fromTarget, this.toTarget, e);
+    this.orbit.set(lerp(this.from.radius, this.to.radius, e), lerp(this.from.phi, this.to.phi, e), lerp(this.from.theta, this.to.theta, e));
+    position.setFromSpherical(this.orbit).add(target);
+    return t >= 1;
+  }
+}
 
 export interface LoadResult {
   warning?: string;
@@ -117,6 +157,8 @@ export class RoomScene {
   private pending = true;
   private rafId = 0;
   private disposed = false;
+  private flight: Flight | null = null;
+  private flightStart = 0;
 
   constructor(container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: false });
@@ -145,6 +187,7 @@ export class RoomScene {
     // OrbitControls turns a full canvas height of drag into a full turn, far too fast on a short card.
     this.controls.rotateSpeed = 0.4;
     this.controls.addEventListener("change", () => this.requestRender());
+    this.controls.addEventListener("start", () => (this.flight = null));
     // Arrow keys pan, so pins outside the saved view can be reached without a pointer.
     canvas.tabIndex = 0;
     canvas.setAttribute("aria-label", "Room view. Drag to turn, arrow keys to move around.");
@@ -287,7 +330,9 @@ export class RoomScene {
   }
 
   /** Points the camera at a saved view, or stands in the middle of the room looking across it. */
-  setView(view: CameraView | undefined): void {
+  setView(view: CameraView | undefined, motion: Motion = "jump"): void {
+    const fromPosition = this.camera.position.clone();
+    const fromTarget = this.controls.target.clone();
     const bounds = this.roomBounds();
     const size = bounds.isEmpty() ? new THREE.Vector3(4, 3, 4) : bounds.getSize(new THREE.Vector3());
     const extent = Math.max(size.x, size.y, size.z);
@@ -300,6 +345,21 @@ export class RoomScene {
       const center = bounds.isEmpty() ? new THREE.Vector3() : bounds.getCenter(new THREE.Vector3());
       this.controls.target.copy(center);
       this.camera.position.copy(center).add(new THREE.Vector3(0, size.y * 0.1, size.z * 0.4));
+    }
+    this.flight = null;
+    if (motion !== "jump" && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      const toPosition = this.camera.position.clone();
+      const toTarget = this.controls.target.clone();
+      if (motion === "enter") {
+        const start = new THREE.Spherical().setFromVector3(toPosition.clone().sub(toTarget));
+        // Far enough to read as arriving, not so far that the camera backs out through the wall behind it.
+        start.set(start.radius * 1.25, Math.max(0.2, start.phi - 0.15), start.theta - 0.45);
+        fromPosition.setFromSpherical(start).add(toTarget);
+        fromTarget.copy(toTarget);
+      }
+      this.flight = new Flight(fromPosition, fromTarget, toPosition, toTarget, motion === "enter" ? ENTER_MS : GLIDE_MS, motion === "enter" ? easeOut : easeInOut);
+      this.flightStart = performance.now();
+      this.flight.pose(0, this.camera.position, this.controls.target);
     }
     this.camera.near = Math.max(0.01, extent / 2000);
     this.camera.far = extent * 20;
@@ -436,10 +496,12 @@ export class RoomScene {
     this.queued = false;
     if (!this.active || this.disposed) return;
     this.pending = false;
+    if (this.flight?.pose(performance.now() - this.flightStart, this.camera.position, this.controls.target)) this.flight = null;
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
     this.renders++;
     this.onRender?.();
+    if (this.flight) this.requestRender();
   };
 
   dispose(): void {

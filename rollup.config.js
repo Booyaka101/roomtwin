@@ -12,6 +12,6 @@ export default {
   plugins: [
     resolve({ browser: true }),
     typescript({ tsconfig: "./tsconfig.json", include: ["src/**/*.ts"] }),
-    terser({ format: { comments: false } }),
+    terser({ format: { comments: /@license|@preserve|^!/ } }),
   ],
 };

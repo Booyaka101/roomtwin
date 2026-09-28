@@ -94,7 +94,7 @@ if (-not $models) { throw "COLMAP could not reconstruct any cameras. The video p
 if ($models.Count -gt 1) { Write-Warning "COLMAP split the capture into $($models.Count) pieces; using the largest. Parts of the room may be missing." }
 
 Invoke-Step "COLMAP undistortion" $Colmap @("image_undistorter", "--image_path", $images, "--input_path", $models[0].FullName,
-  "--output_path", $dataset, "--output_type", "COLMAP")
+  "--output_path", $dataset, "--output_type", "COLMAP", "--max_image_size", "$MaxImageSize")
 
 $registered = (Get-ChildItem -LiteralPath (Join-Path $dataset "images") -File).Count
 Write-Host "    COLMAP placed $registered of $frameCount images"

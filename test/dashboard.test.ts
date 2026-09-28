@@ -102,7 +102,7 @@ describe("saveCard", () => {
     expect(calls[1].config).toEqual(replaceAt(sections, ["views", 1, "sections", 0, "cards", 1], next));
   });
 
-  test("a YAML-mode dashboard can't be read, and the message passes on why", async () => {
+  test("a dashboard with no stored config can't be read, and the message passes on why", async () => {
     const message = await saveError(sections, { read: { code: "config_not_found", message: "No config found." } });
     expect(message).toBe("Couldn't read the dashboard: No config found.");
   });

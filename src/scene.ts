@@ -10,6 +10,7 @@ const Y_UP = new THREE.Vector3(0, 1, 0);
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const ENTER_MS = 1600;
 const GLIDE_MS = 700;
+const KEY_ZOOM = 0.85;
 
 export class SplatLoadError extends Error {}
 
@@ -192,10 +193,17 @@ export class RoomScene {
     // OrbitControls fires no "start" for the keyboard. Added first so the pan applies from where the flight left off.
     canvas.addEventListener("keydown", (e) => {
       if (e.key.startsWith("Arrow")) this.flight = null;
+      if (e.key !== "+" && e.key !== "=" && e.key !== "-") return;
+      e.preventDefault();
+      this.flight = null;
+      if (e.key === "-") this.controls.dollyOut(KEY_ZOOM);
+      else this.controls.dollyIn(KEY_ZOOM);
     });
     // Arrow keys pan, so pins outside the saved view can be reached without a pointer.
     canvas.tabIndex = 0;
-    canvas.setAttribute("aria-label", "Room view. Drag to turn, arrow keys to move around, Home to go back to the saved view.");
+    canvas.setAttribute("role", "application");
+    canvas.setAttribute("aria-roledescription", "3D room");
+    canvas.setAttribute("aria-label", "Room view. Drag to turn, arrow keys to move around, plus and minus to zoom, Home to go back to the saved view.");
     this.controls.listenToKeyEvents(canvas);
   }
 

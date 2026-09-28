@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as THREE from "three";
-import { DOUBLE_TAP_MS, HOLD_MS, PressGesture, activeColor, pinLabel, pinState, projectToScreen, spokenState, tapService, tuckedLabels, type PinBox } from "../src/pins";
+import { DOUBLE_TAP_MS, HOLD_MS, PressGesture, activeColor, flipsLabel, pinLabel, pinState, projectToScreen, spokenState, tapService, tuckedLabels, type PinBox } from "../src/pins";
 import type { HomeAssistant } from "../src/hass";
 import { entity } from "./helpers";
 
@@ -148,6 +148,16 @@ describe("PressGesture", () => {
     expect(onTap).not.toHaveBeenCalled();
   });
 
+  test("a press the browser took over for a scroll or pinch does nothing", () => {
+    const { onTap, onHold, gesture } = setup();
+    gesture.down(event(), 0);
+    gesture.cancel();
+    gesture.up(event());
+    vi.advanceTimersByTime(HOLD_MS);
+    expect(onTap).not.toHaveBeenCalled();
+    expect(onHold).not.toHaveBeenCalled();
+  });
+
   test("dragging off a pin does nothing", () => {
     const { onTap, onHold, gesture } = setup();
     gesture.down(event(0, 0), 0);
@@ -236,6 +246,19 @@ describe("tuckedLabels", () => {
     // The nearer pin's label runs away from the farther one, and the farther one's label clears it.
     expect(tuckedLabels([box(200, 100, 1), box(100, 100, 2, 50)])).toEqual([false, false]);
     expect(tuckedLabels([box(200, 100, 1), box(100, 100, 2, 70)])).toEqual([false, true]);
+  });
+
+  test("a flipped label counts to the left of its icon", () => {
+    const flipped = { ...box(200, 100, 2, 70), flipped: true };
+    expect(tuckedLabels([box(100, 100, 1), flipped])).toEqual([false, true]);
+    expect(tuckedLabels([box(300, 100, 1), flipped])).toEqual([false, false]);
+  });
+
+  test("a label flips to the left only when it would be cut off on the right and fits on the left", () => {
+    expect(flipsLabel(box(100, 100, 1), 400)).toBe(false);
+    expect(flipsLabel(box(360, 100, 1), 400)).toBe(true);
+    expect(flipsLabel(box(60, 100, 1), 100)).toBe(false);
+    expect(flipsLabel(box(390, 100, 1, 0), 400)).toBe(false);
   });
 
   test("a tucked label frees its space, and hidden pins take none", () => {

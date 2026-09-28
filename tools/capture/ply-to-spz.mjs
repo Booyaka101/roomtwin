@@ -28,7 +28,10 @@ async function transcode(options) {
     }
   }
 }
-const { fileBytes: spz } = await transcode({ inputs: [{ fileBytes, pathOrUrl: input }], maxSh: 3 });
+const { fileBytes: spz } = await transcode({ inputs: [{ fileBytes, pathOrUrl: input }], maxSh: 3 }).catch((err) => {
+  console.error(`Cannot convert ${input}: ${err.message ?? err}`);
+  process.exit(1);
+});
 await writeFile(output, spz);
 const mb = (n) => (n / 1024 / 1024).toFixed(1);
 console.log(`${input} (${mb(fileBytes.length)} MB) -> ${output} (${mb(spz.length)} MB) in ${((Date.now() - started) / 1000).toFixed(1)} s`);

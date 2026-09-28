@@ -18,7 +18,12 @@ const BINARY_CLASSES = [...OPENINGS, "motion", "occupancy", "moisture", "smoke"]
 const CLASS_ALIASES: Record<string, string> = { temp: "temperature", lux: "illuminance", co2: "carbon_dioxide" };
 const TOGGLES = new Set(["light", "switch", "fan", "input_boolean"]);
 // HA clears these while a light is off and brings them back when it turns on again.
-const OFF_LOOK = { brightness: null, rgb_color: null, color_mode: null };
+const OFF_LOOK = { brightness: null, rgb_color: null, color_temp_kelvin: null, color_mode: null };
+const WARM_WHITE = { color_mode: "color_temp", color_temp_kelvin: 3000, rgb_color: [255, 180, 107] };
+const MOTION_CLASSES = new Set(["motion", "occupancy"]);
+// A motion sensor trips about every 75 seconds on average and clears 20 seconds later.
+const TRIP_CHANCE = 5 / 75;
+const TRIP_MS = 20_000;
 
 const BINARY_TEXT: Record<string, [string, string]> = {
   door: ["Open", "Closed"],
@@ -48,7 +53,7 @@ export function guessEntity(entityId: string, now = new Date().toISOString()): H
   const attributes: HassEntity["attributes"] = { friendly_name: titleCase(entityId.split(".")[1]) };
   let state = "on";
   if (domain === "light") {
-    Object.assign(attributes, { brightness: 255, color_mode: "hs", rgb_color: [255, 255, 255], supported_color_modes: ["hs"] });
+    Object.assign(attributes, { brightness: 255, ...WARM_WHITE, supported_color_modes: ["color_temp", "hs"] });
   } else if (domain === "sensor") {
     const cls = guessClass(entityId, Object.keys(SENSOR_CLASSES));
     const sensor = cls ? SENSOR_CLASSES[cls] : undefined;
@@ -63,7 +68,7 @@ export function guessEntity(entityId: string, now = new Date().toISOString()): H
     const cls = guessClass(entityId, OPENINGS);
     if (cls) attributes.device_class = cls === "garage_door" ? "garage" : cls;
   } else if (domain === "scene" || domain === "button" || domain === "input_button") {
-    state = domain === "scene" ? now : "unknown";
+    state = "unknown";
   } else if (domain === "script" || domain === "fan" || domain === "input_boolean") {
     state = "off";
   } else if (domain === "lock") {
@@ -80,14 +85,16 @@ export function guessEntity(entityId: string, now = new Date().toISOString()): H
 /** The text HA's frontend would show for a state, for the handful of domains the demo simulates. */
 export function formatState(stateObj: HassEntity): string {
   const { state, attributes } = stateObj;
-  if (attributes.unit_of_measurement) return `${state} ${attributes.unit_of_measurement}`;
   const domain = domainOf(stateObj.entity_id);
+  if (state === "unavailable") return "Unavailable";
+  if (state === "unknown") return domain === "button" || domain === "input_button" ? "Never used" : "Unknown";
+  const unit = attributes.unit_of_measurement;
+  if (unit) return unit === "%" ? `${state}%` : `${state} ${unit}`;
   if (domain === "binary_sensor") {
     const [on, off] = BINARY_TEXT[String(attributes.device_class)] ?? ["On", "Off"];
     return state === "on" ? on : off;
   }
   if (/^\d{4}-\d\d-\d\dT/.test(state)) return `Last run ${new Date(state).toLocaleTimeString()}`;
-  if (state === "unknown") return "Never used";
   return titleCase(state);
 }
 
@@ -153,28 +160,34 @@ export class SimHome {
 
   /** Remembers how a light looked and returns the attributes that clear it, as turning it off does in HA. */
   private dim(stateObj: HassEntity): typeof OFF_LOOK {
-    const { brightness, rgb_color, color_mode } = stateObj.attributes;
-    this.lastLook[stateObj.entity_id] = { brightness, rgb_color, color_mode };
+    this.lastLook[stateObj.entity_id] = Object.fromEntries(Object.keys(OFF_LOOK).map((key) => [key, stateObj.attributes[key]]));
     Object.assign(stateObj.attributes, OFF_LOOK);
     return OFF_LOOK;
   }
 
   async callService(domain: string, service: string, data: Record<string, unknown> = {}): Promise<void> {
+    // A target can name several entities, and HA runs the service on each.
+    if (Array.isArray(data.entity_id)) {
+      for (const entity_id of data.entity_id) await this.callService(domain, service, { ...data, entity_id });
+      return;
+    }
     const id = String(data.entity_id ?? "");
     const stateObj = this.states[id];
     if (!stateObj) throw new Error(id ? `${id} is not in this demo home` : `${domain}.${service} needs an entity_id in this demo`);
     const on = stateObj.state === "on";
-    const { entity_id: _, ...attrs } = data;
+    const { entity_id: _, brightness_pct, transition: __, ...attrs } = data;
     if (TOGGLES.has(domain) && ["toggle", "turn_on", "turn_off"].includes(service)) {
       const next = service === "toggle" ? !on : service === "turn_on";
-      if (attrs.rgb_color) attrs.color_mode = "hs";
-      if (attrs.color_temp_kelvin) attrs.color_mode = "color_temp";
+      if (brightness_pct != null) attrs.brightness = Math.round(Number(brightness_pct) * 2.55);
+      if (attrs.rgb_color) Object.assign(attrs, { color_mode: "hs", color_temp_kelvin: null });
+      if (attrs.color_temp_kelvin) Object.assign(attrs, { ...WARM_WHITE, color_temp_kelvin: attrs.color_temp_kelvin });
       if (domain === "light" && next && !on) Object.assign(attrs, { brightness: 255, ...this.lastLook[id], ...attrs });
       if (domain === "light" && !next && on) Object.assign(attrs, this.dim({ ...stateObj, attributes: { ...stateObj.attributes } }));
       this.set(id, next ? "on" : "off", attrs);
     } else if (domain === "cover" && ["toggle", "open_cover", "close_cover", "stop_cover"].includes(service)) {
       const moving = stateObj.state === "opening" || stateObj.state === "closing";
       if (service === "stop_cover" || (service === "toggle" && moving)) {
+        if (!moving) return;
         // A cover stopped part way reports open, as it does in HA.
         this.cancel(id);
         this.set(id, "open");
@@ -210,6 +223,17 @@ export class SimHome {
       changed = this.write(stateObj.entity_id, (value + (up ? step : -step)).toFixed(decimals)) || changed;
     }
     if (changed) this.onChange(this.hass);
+  }
+
+  /** Now and then a motion sensor sees someone, the way a lived-in room would. */
+  stir(random = Math.random): void {
+    for (const stateObj of Object.values(this.states)) {
+      const id = stateObj.entity_id;
+      if (domainOf(id) !== "binary_sensor" || !MOTION_CLASSES.has(String(stateObj.attributes.device_class))) continue;
+      if (stateObj.state !== "off" || this.timers.has(id) || random() >= TRIP_CHANCE) continue;
+      this.set(id, "on");
+      this.later(id, TRIP_MS, () => this.set(id, "off"));
+    }
   }
 
   dispose(): void {

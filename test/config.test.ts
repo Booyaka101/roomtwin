@@ -1,4 +1,6 @@
 import { describe, expect, test } from "vitest";
+import { parse } from "yaml";
+import readme from "../README.md?raw";
 import { ConfigError, aspectRatio, bindingRefs, parseConfig, splatExtension } from "../src/config";
 
 const base = { type: "custom:roomtwin-card", splat: "/local/roomtwin/living.spz" };
@@ -28,22 +30,10 @@ describe("parseConfig", () => {
   });
 
   test("the example from the README parses", () => {
-    const config = parseConfig({
-      ...base,
-      up: [0, 1, 0],
-      ceiling_cut: 2.3,
-      lights: [{ entity: "light.floor_lamp", anchor: [1.42, 0.35, -2.1], radius: 1.6, soft_edge: 0.6, off_dim: 0.45 }],
-      pins: [{ entity: "sensor.living_temperature", anchor: [-0.8, 1.1, -2.9] }],
-    });
-    expect(config.ceiling_cut).toBe(2.3);
-    expect(config.lights[0]).toEqual({
-      entity: "light.floor_lamp",
-      anchor: [1.42, 0.35, -2.1],
-      radius: 1.6,
-      soft_edge: 0.6,
-      off_dim: 0.45,
-    });
-    expect(config.pins[0]).toEqual({ entity: "sensor.living_temperature", anchor: [-0.8, 1.1, -2.9] });
+    const example = readme.split("## Configuration reference")[1].match(/```yaml\r?\n([\s\S]*?)```/)![1];
+    const config = parseConfig(parse(example));
+    expect(config.lights.length).toBeGreaterThan(0);
+    expect(config.pins.length).toBeGreaterThan(0);
   });
 
   test("light options default when left out", () => {
@@ -180,5 +170,7 @@ test("aspectRatio", () => {
   // HA's visual editor sends text, so a plain number arrives as a string.
   expect(aspectRatio("1.5")).toBe(1.5);
   expect(aspectRatio(" 2 ")).toBe(2);
+  expect(aspectRatio("4x3")).toBeCloseTo(4 / 3);
+  expect(() => aspectRatio(61)).toThrow('Put it in quotes: "1:1"');
   expect(() => aspectRatio(243)).toThrow('unquoted 4:3. Put it in quotes: "4:3"');
 });

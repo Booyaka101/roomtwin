@@ -57,13 +57,14 @@ With [HACS](https://hacs.xyz):
 
 Manual install: download `roomtwin-card.js` from the [latest release](https://github.com/Booyaka101/roomtwin/releases/latest) and copy it to `/config/www/roomtwin-card.js`. Then under Settings, Dashboards, three-dot menu, Resources, add `/local/roomtwin-card.js?v=0.1.0` as a **JavaScript module**. The Resources entry only shows with Advanced mode turned on in your user profile. Change the `?v=` part whenever you replace the file, or browsers keep the old one. Any value works, the version number is just easy to remember.
 
-If your dashboards are in YAML mode, add the resource to `configuration.yaml` instead. With HACS the URL is `/hacsfiles/roomtwin/roomtwin-card.js`:
+If your dashboards are in YAML mode, add the resource to `configuration.yaml` instead:
 
 ```yaml
 lovelace:
   resources:
-    - url: /local/roomtwin-card.js?v=0.1.0
+    - url: /hacsfiles/roomtwin/roomtwin-card.js # installed with HACS
       type: module
+    # or, installed by hand: /local/roomtwin-card.js?v=0.1.0
 ```
 
 ## 4. Add the card and place your devices
@@ -86,7 +87,9 @@ Admins see a pencil button in the corner. It opens edit mode, which works on the
 4. Optionally turn on **Ceiling cut** so you can see into the room from above, and press **Use this view as default** once the camera is where you like it.
 5. Press **Save**. The card writes its new config into the dashboard, leaving everything else on it as it was, and Home Assistant redraws the dashboard with it.
 
-Nothing is saved until step 5. The editor says so while you have unsaved changes. **Undo** steps back one change at a time (a whole slider drag counts as one), and **Discard changes** puts everything back.
+Nothing is saved until step 5. The editor says so while you have unsaved changes, and after **Close** the pencil wears a dot until you save or discard them. **Undo** steps back one change at a time (a whole slider drag counts as one, and so does typing in one field), and **Discard changes** puts everything back. Closing and reopening the editor keeps the undo history.
+
+From the keyboard, Esc lets go of the selected light or pin (or cancels placing one), Ctrl+Z undoes, and Delete removes the selected one. Inside a text field those keys do their usual thing.
 
 Save needs a dashboard managed from the UI. A YAML-mode dashboard only changes in its file, so there the editor has **Copy YAML** instead: paste the result over the card's entry in the dashboard's YAML file. If a save fails for another reason, the editor says why, and **Copy YAML** into the card's code editor does the same job. Save is also hidden while the dashboard itself is in edit mode, where the card is only a preview. Home Assistant redraws the dashboard whenever anyone saves it, so changes you haven't saved yet are lost if someone saves the same dashboard from another tab.
 
@@ -99,12 +102,12 @@ The card's visual editor in the dashboard dialog covers the plain options: the s
 - Garage doors, gates and doors (covers with those device classes) open more-info on tap instead of moving, so brushing the pin can't open the garage.
 - **Long-press** any pin to open the more-info dialog. Tapping a sensor, an unavailable entity or anything else without a tap action opens more-info too.
 - A pin or light with its own `tap_action`, `hold_action` or `double_tap_action` does that instead, using the same actions as Home Assistant's own cards: `more-info`, `toggle`, `navigate`, `url`, `perform-action`, `assist` or `none`, with `confirmation` if you want a prompt first. That also overrides the garage door rule above, so a `toggle` tap action on a garage door does move it. Once a pin has a double tap action, a single tap on it waits a quarter of a second to rule out a second one.
-- From the keyboard, Tab to a pin, then Enter or Space taps it, and Shift+Enter or the menu key does what a long-press does. Screen readers hear the pin's name and state. Tab to the room itself and the arrow keys move around it; Home goes back to the saved view.
+- From the keyboard, Tab to a pin, then Enter or Space taps it, and Shift+Enter or the menu key does what a long-press does. Screen readers hear the pin's name and state. Tab to the room itself and the arrow keys move around it, plus and minus zoom, and Home goes back to the saved view.
 - Sensor pins show the current state with its unit and update live.
 - A pin that is on, open, playing, unlocked, set to heat and so on takes your theme's colour for that state, the way Home Assistant's tiles do, and a coloured light's pin shows the light's colour.
 - A pin turns red while it has something to look at: a binary sensor for an open door, window or garage door, or smoke, gas, carbon monoxide, a leak, a safety problem or tampering, and also a jammed lock, a triggered alarm or a vacuum reporting an error.
 - A pin whose entity doesn't exist shows as a grey question mark, so a renamed entity is easy to spot.
-- Where pins crowd together on screen, the one further back hides its label until you hover it, tab to it or select it in edit mode. Its icon stays where the device is.
+- Where pins crowd together on screen, the one further back hides its label until you hover it, tab to it or select it in edit mode. Its icon stays where the device is. A pin near the right edge puts its label on the left instead, so it isn't cut off.
 - Drag to look around and right-drag to pan. Scrolling over the card scrolls the dashboard as usual, so zoom by holding Ctrl (Cmd on a Mac) while you scroll, or pinch. In edit mode the scroll wheel zooms on its own.
 - On a touch screen, swipe sideways to turn the view and pinch to zoom. An up or down swipe scrolls the dashboard.
 - A card doesn't download its room until it first scrolls into view, and cards that are off-screen or on a hidden tab stop rendering entirely.
@@ -189,11 +192,11 @@ With the system's reduce motion setting on, the card skips the camera moves and 
 Each light multiplies the colour of the splats inside its soft sphere:
 
 - off, unavailable or missing: `off_dim` on every channel.
-- on: `f = off_dim + (1 - off_dim) × brightness / 255`. A light in a colour mode (`hs`, `xy`, `rgb`, `rgbw`, `rgbww`) is tinted three quarters of the way towards its `rgb_color`, scaled so the brightest channel is 1, so a red bulb still leaves a quarter of the green and blue. Otherwise the tint is white, including white bulbs in `color_temp` mode, since the capture already shows their warmth.
+- on: `f = off_dim + (1 - off_dim) × brightness / 255`. A light in a colour mode (`hs`, `xy`, `rgb`, `rgbw`, `rgbww`), or one that reports `rgb_color` without a `color_mode`, is tinted three quarters of the way towards its `rgb_color`, scaled so the brightest channel is 1, so a red bulb still leaves a quarter of the green and blue. Otherwise the tint is white, including white bulbs in `color_temp` mode, since the capture already shows their warmth.
 
 So at the default `off_dim` of 0.45 a light at full brightness leaves its region exactly as captured, and switching it off darkens it to 45%. Capture the room with the lights on for the best result.
 
-Spark has room for 16 light regions at first and doubles that on demand, which costs one short shader rebuild when you add the 17th. 24 lights on one card were tested and render fine. Each light adds a little per-frame work, so keep an eye on tablets if you go well beyond that.
+Spark has room for 16 edits at first and doubles that on demand, which costs one short shader rebuild when you go past 16. Each light is one edit and the ceiling cut is another. 24 lights on one card were tested and render fine. Each light adds a little per-frame work, so keep an eye on tablets if you go well beyond that.
 
 ## Troubleshooting
 
@@ -232,7 +235,7 @@ The card uses Lit, three.js and [Spark](https://sparkjs.dev) 2.2.0, bundled by R
 
 `npm run demo -- --serve` builds the live demo, the card on a real room with a simulated home around it, and serves it at http://localhost:4173. It needs a scan and the card's YAML in `demo/`; [demo/README.md](demo/README.md) covers that and publishing it on GitHub Pages.
 
-To release, bump `version` in `package.json` and `src/version.ts` (a test keeps them equal), add a `## <version>` section to `CHANGELOG.md`, commit, and push a tag `v<version>`. The release workflow checks the tag matches `package.json`, typechecks, tests and builds the card, creates the GitHub release with those notes and `roomtwin-card.js` attached, then runs the HACS check. HACS installs from the release asset. The HACS check fails unless the README shows at least one image (a screenshot or GIF of the card, not just badges), so add one before the first tag.
+To release, run `npm version <version> --no-git-tag-version` (it updates `package.json` and `package-lock.json`), set the same version in `src/version.ts` (a test keeps them equal), add a `## <version>` section to `CHANGELOG.md`, commit, and push a tag `v<version>`. The release workflow checks the tag matches `package.json`, typechecks, tests and builds the card, creates the GitHub release with those notes and `roomtwin-card.js` attached, then runs the HACS check. HACS installs from the release asset. The HACS check fails unless the README shows at least one image (a screenshot or GIF of the card, not just badges), so add one before the first tag.
 
 ## License
 

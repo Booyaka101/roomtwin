@@ -6,7 +6,7 @@ import { canSave, dashboardUrlPath, saveCard } from "./dashboard";
 import { toCardConfig, toYaml, type HelperDetail, type RoomTwinEditor, type Selected } from "./editor";
 import type { HassEntity, HomeAssistant } from "./hass";
 import { LightRig } from "./lights";
-import { PressGesture, activeColor, pinLabel, pinState, projectToScreen, spokenState, tapService, tuckedLabels, type PinBox } from "./pins";
+import { PressGesture, activeColor, flipsLabel, pinLabel, pinState, projectToScreen, spokenState, tapService, tuckedLabels, type PinBox } from "./pins";
 import { RoomScene, SplatLoadError, webgl2Available, type Motion } from "./scene";
 import { VERSION } from "./version";
 
@@ -33,6 +33,14 @@ const NO_WEBGL2 =
 
 type Status = { kind: "loading"; progress: number } | { kind: "ready" } | { kind: "error"; message: string; retry: boolean };
 
+// The same refs while the config is unchanged, so a tap waiting out the double tap window still matches.
+const refs = new WeakMap<RoomTwinConfig, BindingRef[]>();
+function refsOf(config: RoomTwinConfig): BindingRef[] {
+  let list = refs.get(config);
+  if (!list) refs.set(config, (list = bindingRefs(config)));
+  return list;
+}
+
 export class RoomTwinCard extends LitElement {
   static properties = {
     preview: { attribute: false },
@@ -53,6 +61,7 @@ export class RoomTwinCard extends LitElement {
   private rawConfig?: Record<string, unknown>;
   private dirtyMemo?: { draft: RoomTwinConfig; config: RoomTwinConfig; dirty: boolean };
   private loadTimer?: ReturnType<typeof setTimeout>;
+  private timerKey = "";
   // Home Assistant builds new cards after the dashboard is saved, so this one won't come back.
   private replaced = false;
   private _draft: RoomTwinConfig | null = null;
@@ -144,9 +153,14 @@ export class RoomTwinCard extends LitElement {
     this._hass = hass;
     const config = this.shown;
     if (!config) return;
-    // The editor looks up any entity, not just the bound ones. A new locale changes how every pin reads.
+    // The editor looks up any entity, not just the bound ones. A new locale or formatter changes how every pin reads.
     const changed =
-      !old || this._editing || old.locale !== hass.locale || bindingRefs(config).some((p) => old.states[p.entity] !== hass.states[p.entity]);
+      !old ||
+      this._editing ||
+      old.locale !== hass.locale ||
+      old.formatEntityState !== hass.formatEntityState ||
+      old.user !== hass.user ||
+      refsOf(config).some((p) => old.states[p.entity] !== hass.states[p.entity]);
     if (changed) {
       if (this.lights?.applyStates(hass.states)) this.scene?.requestRender();
       this.requestUpdate();
@@ -232,10 +246,8 @@ export class RoomTwinCard extends LitElement {
     if (document.visibilityState === "visible") this.requestUpdate();
   };
 
-  // OrbitControls listens for Ctrl on the canvas's root node, this shadow root, to tell a held Ctrl from a trackpad
-  // pinch. Focus is rarely inside the card, so without this every Ctrl+wheel notch zooms ten times too far.
-  // Leaving the window (Ctrl+Tab) sends the keyup elsewhere, so the window's blur counts as letting go. Blurs of
-  // elements inside the page pass through this capture listener too, and Ctrl is still held for those.
+  // OrbitControls tracks Ctrl on this shadow root, and focus is rarely inside it. Only the window's blur means Ctrl
+  // was let go elsewhere; blurs inside the page pass through this capture listener too.
   private onControlKey = (e: Event): void => {
     if (e.type === "blur") {
       if (e.target === window) this.renderRoot.dispatchEvent(new KeyboardEvent("keyup", { key: "Control" }));
@@ -245,6 +257,7 @@ export class RoomTwinCard extends LitElement {
 
   private teardown(): void {
     clearTimeout(this.loadTimer);
+    this.loadTimer = undefined;
     this.abort?.abort();
     this.lights?.dispose();
     this.lights = undefined;
@@ -262,7 +275,7 @@ export class RoomTwinCard extends LitElement {
     // Waiting until the card is on screen keeps a dashboard of rooms from downloading all of them at once.
     const visible = this.onScreen && document.visibilityState === "visible";
     if (config && this.canvasHost && visible && this.loadedKey !== this.loadKey(config)) this.scheduleLoad(config);
-    this.pins = config ? bindingRefs(config) : [];
+    this.pins = config ? refsOf(config) : [];
     this.pinEls = [...this.renderRoot.querySelectorAll<HTMLElement>(".pin")];
     this.positionPins();
   }
@@ -272,8 +285,12 @@ export class RoomTwinCard extends LitElement {
       void this.load(config);
       return;
     }
+    // Every hass update comes through here, so only a different splat restarts the wait.
+    if (this.loadTimer !== undefined && this.timerKey === this.loadKey(config)) return;
     clearTimeout(this.loadTimer);
+    this.timerKey = this.loadKey(config);
     this.loadTimer = setTimeout(() => {
+      this.loadTimer = undefined;
       const latest = this.shown;
       if (latest && this.isConnected && this.loadedKey !== this.loadKey(latest)) void this.load(latest);
     }, PREVIEW_LOAD_DELAY_MS);
@@ -357,12 +374,17 @@ export class RoomTwinCard extends LitElement {
       const p = pin ? projectToScreen(scene.captureToWorld(pin.anchor, this.tmp), scene.camera, width, height) : { x: 0, y: 0, depth: 0, visible: false };
       const face = el.firstElementChild as HTMLElement | null;
       const label = face?.querySelector<HTMLElement>(".label");
-      return { ...p, size: face?.offsetHeight ?? 0, labelWidth: label?.offsetWidth ?? 0 };
+      const box = { ...p, size: face?.offsetHeight ?? 0, labelWidth: label?.offsetWidth ?? 0 };
+      return { ...box, flipped: flipsLabel(box, width) };
     });
     const tucked = tuckedLabels(boxes);
     this.pinEls.forEach((el, i) => {
       const p = boxes[i];
-      el.style.transform = `translate(${p.x - p.size / 2}px, ${p.y - p.size / 2}px)`;
+      // A flipped pin hangs from the icon's right edge, so the icon stays put when hovering shows a tucked label.
+      el.style.transform = p.flipped
+        ? `translate(${p.x + p.size / 2}px, ${p.y - p.size / 2}px) translateX(-100%)`
+        : `translate(${p.x - p.size / 2}px, ${p.y - p.size / 2}px)`;
+      el.classList.toggle("flipped", !!p.flipped);
       el.style.visibility = p.visible ? "" : "hidden";
       // Nearer pins on top, to the centimetre.
       el.style.zIndex = String(Math.max(0, Math.round(100_000 - p.depth * 100)));
@@ -665,7 +687,7 @@ export class RoomTwinCard extends LitElement {
               @keydown=${this.onPinKey}
               @contextmenu=${(e: Event) => e.preventDefault()}
             >
-              ${bindingRefs(config).map((pin, i) => this.renderPin(pin, i, hass))}
+              ${refsOf(config).map((pin, i) => this.renderPin(pin, i, hass))}
             </div>`
           : nothing}
         ${this.renderStatus()}
@@ -676,7 +698,12 @@ export class RoomTwinCard extends LitElement {
                 <svg viewBox="0 0 24 24"><path d=${MDI_HOME}></path></svg>
               </button>
               ${hass?.user?.is_admin && !this._editing
-                ? html`<button title="Edit pins and lights" aria-label="Edit pins and lights" @click=${this.openEditor}>
+                ? html`<button
+                    class=${this.dirty ? "unsaved" : ""}
+                    title=${this.dirty ? "Edit pins and lights (unsaved changes)" : "Edit pins and lights"}
+                    aria-label=${this.dirty ? "Edit pins and lights, unsaved changes" : "Edit pins and lights"}
+                    @click=${this.openEditor}
+                  >
                     <svg viewBox="0 0 24 24"><path d=${MDI_PENCIL}></path></svg>
                   </button>`
                 : nothing}
@@ -687,8 +714,9 @@ export class RoomTwinCard extends LitElement {
           : nothing}
       </div>
       ${this._warning ? html`<ha-alert alert-type="warning">${this._warning}</ha-alert>` : nothing}
-      ${this._editing && this._draft && hass && ready
+      ${this._draft && hass && ready
         ? html`<roomtwin-editor
+            ?hidden=${!this._editing}
             .hass=${hass}
             .config=${this._draft}
             .dirty=${this.dirty}
@@ -772,12 +800,14 @@ export class RoomTwinCard extends LitElement {
     .hint:empty {
       opacity: 0;
     }
+    /* Placement assumes the icon comes first, so right-to-left text only flips inside a label. */
     .pins {
       position: absolute;
       inset: 0;
       overflow: hidden;
       pointer-events: none;
       isolation: isolate;
+      direction: ltr;
     }
     .pin {
       --size: var(--roomtwin-pin-size, 36px);
@@ -787,7 +817,7 @@ export class RoomTwinCard extends LitElement {
       outline: none;
       pointer-events: auto;
       cursor: pointer;
-      touch-action: none;
+      touch-action: pan-y;
       user-select: none;
       -webkit-user-select: none;
       -webkit-touch-callout: none;
@@ -838,8 +868,18 @@ export class RoomTwinCard extends LitElement {
         color 0.3s,
         box-shadow 0.3s;
     }
+    .editing .pin {
+      touch-action: none;
+    }
     .label {
       padding: 0 9px 0 3px;
+      unicode-bidi: plaintext;
+    }
+    .pin.flipped .face {
+      flex-direction: row-reverse;
+    }
+    .pin.flipped .label {
+      padding: 0 3px 0 9px;
     }
     .pin.tucked:not(:hover, :focus-visible, .selected) .label {
       position: absolute;
@@ -986,6 +1026,7 @@ export class RoomTwinCard extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
+      position: relative;
       width: 40px;
       height: 40px;
       padding: 0;
@@ -997,6 +1038,16 @@ export class RoomTwinCard extends LitElement {
     }
     .tools button:hover {
       background: rgba(18, 20, 26, 0.8);
+    }
+    .tools button.unsaved::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--warning-color, #ffa600);
     }
     .tools button:active {
       transform: scale(0.92);
@@ -1069,6 +1120,14 @@ export class RoomTwinCard extends LitElement {
     @keyframes fade-in {
       from {
         opacity: 0;
+      }
+    }
+    @media (forced-colors: active) {
+      .pin.active .bubble,
+      .bar > div {
+        forced-color-adjust: none;
+        background: Highlight;
+        color: HighlightText;
       }
     }
     @media (prefers-reduced-motion: reduce) {

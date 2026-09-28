@@ -85,7 +85,7 @@ function yamlString(s: string): string {
 }
 
 function yamlScalar(value: unknown): string {
-  if (typeof value === "number") return String(round(value));
+  if (typeof value === "number") return String(value);
   if (typeof value === "string") return yamlString(value);
   if (typeof value === "boolean") return String(value);
   if (value === null || value === undefined) return "null";
@@ -222,7 +222,7 @@ export class RoomTwinEditor extends LitElement {
     _saving: { state: true },
     _saveError: { state: true },
     _history: { state: true },
-    _typo: { state: true },
+    _typing: { state: true },
   };
 
   hass!: HomeAssistant;
@@ -243,12 +243,40 @@ export class RoomTwinEditor extends LitElement {
   private _saving = false;
   private _saveError = "";
   private _history: RoomTwinConfig[] = [];
-  /** An icon name that didn't pass, kept in its field so it can be corrected rather than retyped. */
-  private _typo: { for: Selected; value: string } | null = null;
+  /** Text as typed, so a live update can't strip a trailing space or an icon name that isn't finished. */
+  private _typing: { for: Selected; key: "name" | "icon"; value: string } | null = null;
   // A slider drag is one step to undo, not one per pixel.
   private dragging = "";
   // Sorted when the entity picker opens, not on every state update while it's open.
   private ids: string[] = [];
+  // The button that was pressed goes away with its task, so focus moves back into the task.
+  private refocus = false;
+
+  connectedCallback(): void {
+    super.connectedCallback();
+    this.addEventListener("keydown", this.onKey);
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.removeEventListener("keydown", this.onKey);
+  }
+
+  private onKey = (e: KeyboardEvent): void => {
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.composedPath()[0] as HTMLElement).tagName ?? "");
+    if (e.key === "Escape" && (this._selected || this._pending || this._floorPoints)) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.endTask();
+    } else if (typing) return;
+    else if (e.key.toLowerCase() === "z" && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+      e.preventDefault();
+      this.undo();
+    } else if ((e.key === "Delete" || e.key === "Backspace") && this._selected) {
+      e.preventDefault();
+      this.removeSelected();
+    }
+  };
 
   /** A tap on the splat landed on `point` (capture coordinates), or on nothing solid when null. */
   handlePick(point: Vec3 | null): void {
@@ -294,12 +322,25 @@ export class RoomTwinEditor extends LitElement {
     this._selected = null;
     this._pending = null;
     this._floorPoints = null;
+    this._entity = "";
     this._message = "";
+    this._typing = null;
     this.dragging = "";
+  }
+
+  /** Clears the task from one of its own buttons or a key, keeping the keyboard in the panel. */
+  private endTask(): void {
+    this.clearTask();
+    this.refocus = true;
   }
 
   protected updated(changed: PropertyValues): void {
     if (changed.has("_pending") && this._pending) this.renderRoot.querySelector<HTMLInputElement>("input.entity")?.focus();
+    else if (this.refocus) {
+      const task = this.renderRoot.querySelector<HTMLElement>(".task");
+      (task?.querySelector<HTMLElement>("input") ?? task)?.focus();
+    }
+    this.refocus = false;
     if (changed.has("_selected") || changed.has("_pending") || changed.has("config")) {
       this.dispatchEvent(new CustomEvent<HelperDetail>("helper-changed", { detail: this.helper() }));
     }
@@ -344,6 +385,7 @@ export class RoomTwinEditor extends LitElement {
     const selected = this.selectedBinding()?.entity;
     this._history = steps.slice(0, -1);
     this.dragging = "";
+    this._typing = null;
     this.show(previous);
     // Undoing a removal shifts the indexes, so keep the selection only if it still points at the same entity.
     if (this.selectedBinding()?.entity !== selected) this._selected = null;
@@ -376,12 +418,14 @@ export class RoomTwinEditor extends LitElement {
     }
     this._pending = null;
     this._entity = "";
+    this._message = "";
+    this.refocus = true;
   }
 
   private removeSelected(): void {
     if (!this._selected) return;
     const { kind, index } = this._selected;
-    this._selected = null;
+    this.endTask();
     if (kind === "light") this.commit({ ...this.config, lights: this.config.lights.filter((_, i) => i !== index) });
     else this.commit({ ...this.config, pins: this.config.pins.filter((_, i) => i !== index) });
   }
@@ -405,6 +449,7 @@ export class RoomTwinEditor extends LitElement {
   }
 
   private close(): void {
+    this.clearTask();
     this.dispatchEvent(new CustomEvent("editor-closed"));
   }
 
@@ -442,25 +487,31 @@ export class RoomTwinEditor extends LitElement {
 
   private textField(label: string, key: "name" | "icon", placeholder: string) {
     const selected = this._selected!;
-    const typo = key === "icon" && this._typo?.for === selected ? this._typo.value : undefined;
+    const typed = this._typing?.for === selected && this._typing.key === key ? this._typing.value : undefined;
     return html`<label class="slider"
       ><span>${label}</span
       ><input
-        .value=${live(typo ?? this.selectedBinding()?.[key] ?? "")}
+        .value=${live(typed ?? this.selectedBinding()?.[key] ?? "")}
         placeholder=${placeholder}
         autocapitalize=${key === "icon" ? "off" : nothing}
         autocorrect=${key === "icon" ? "off" : nothing}
         spellcheck=${key === "icon" ? "false" : nothing}
+        @input=${(e: Event) => {
+          const typed = (e.target as HTMLInputElement).value;
+          const value = typed.trim();
+          this._typing = { for: selected, key, value: typed };
+          if (key === "icon" && value && !ICON.test(value)) return;
+          this._message = "";
+          this.commit(this.withBinding(selected.kind, selected.index, { [key]: value || undefined }), `${key}:${selected.kind}:${selected.index}`);
+        }}
         @change=${(e: Event) => {
           const value = (e.target as HTMLInputElement).value.trim();
+          this.endDrag();
           if (key === "icon" && value && !ICON.test(value)) {
-            this._typo = { for: selected, value };
             this._message = `${value} is not an icon name. Icons look like mdi:lamp.`;
             return;
           }
-          this._typo = null;
-          this._message = "";
-          this.commit(this.withBinding(selected.kind, selected.index, { [key]: value || undefined }));
+          this._typing = null;
         }}
     /></label>`;
   }
@@ -468,7 +519,7 @@ export class RoomTwinEditor extends LitElement {
   private renderTask() {
     if (this._floorPoints) {
       return html`<p>Tap ${3 - this._floorPoints.length} more point${this._floorPoints.length === 2 ? "" : "s"} on the floor, spread out.</p>
-        <div class="row"><button @click=${() => (this._floorPoints = null)}>Cancel</button></div>`;
+        <div class="row"><button @click=${this.endTask}>Cancel</button></div>`;
     }
     if (this._pending) {
       const entity = this._entity.trim();
@@ -497,7 +548,7 @@ export class RoomTwinEditor extends LitElement {
         <div class="row">
           <button ?disabled=${!valid || !LIGHT_DOMAINS.has(domainOf(entity))} @click=${() => this.add("light")}>Add as light</button>
           <button ?disabled=${!valid} @click=${() => this.add("pin")}>Add as pin</button>
-          <button @click=${() => ((this._pending = null), (this._entity = ""))}>Cancel</button>
+          <button @click=${this.endTask}>Cancel</button>
         </div>`;
     }
     const binding = this.selectedBinding();
@@ -512,7 +563,7 @@ export class RoomTwinEditor extends LitElement {
         ${this.textField("Label", "name", this.hass.states[binding.entity]?.attributes.friendly_name ?? "")}
         ${this.textField("Icon", "icon", String(this.hass.states[binding.entity]?.attributes.icon ?? "The entity's icon"))}
         <div class="row">
-          <button @click=${() => (this._selected = null)}>Done</button>
+          <button @click=${this.endTask}>Done</button>
           <button class="danger" @click=${this.removeSelected}>Remove</button>
         </div>`;
     }
@@ -539,8 +590,9 @@ export class RoomTwinEditor extends LitElement {
     const { step, cutMax, suggestedCut } = roomRanges(this.getRoomHeight());
     const bindings = bindingRefs(this.config);
     return html`
-      <section class="task">
-        ${this.renderTask()} ${this._message ? html`<p class="note" role="status">${this._message}</p>` : nothing}
+      <section class="task" tabindex="-1">
+        ${this.renderTask()}
+        <p class="note" role="status">${this._message}</p>
       </section>
       ${bindings.length
         ? html`<h3>In this room</h3>
@@ -630,8 +682,17 @@ export class RoomTwinEditor extends LitElement {
       border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
       background: color-mix(in srgb, var(--accent) 8%, transparent);
     }
+    :host([hidden]) {
+      display: none;
+    }
+    .task:focus {
+      outline: none;
+    }
     .note {
       color: var(--secondary-text-color);
+    }
+    .note:empty {
+      margin: 0;
     }
     .note.error {
       color: var(--error-color, #db4437);

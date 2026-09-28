@@ -19,7 +19,13 @@
         --card-background-color: #1c1c1c;
         --text-primary-color: #ffffff;
         --error-color: #db4437;
+        --state-active-color: #ffc107;
         --state-light-active-color: #ffc107;
+        --state-cover-active-color: #926bc7;
+        --state-fan-active-color: #00bcd4;
+        --state-lock-unlocked-color: #f44336;
+        --state-media_player-active-color: #03a9f4;
+        --state-climate-heat-color: #ff6f22;
         --code-font-family: ui-monospace, Consolas, monospace;
         --glass: rgba(26, 28, 34, 0.62);
         --glass-edge: rgba(255, 255, 255, 0.08);
@@ -86,9 +92,13 @@
       dialog .entity { margin: 18px 0 0; font-family: var(--code-font-family); font-size: 0.8rem; color: var(--secondary-text-color); }
       .slider { display: grid; gap: 6px; width: 100%; font-size: 0.85rem; color: var(--secondary-text-color); }
       .slider input { width: 100%; accent-color: var(--state-light-active-color); }
-      .swatches { display: flex; gap: 10px; }
+      .swatches { display: flex; flex-wrap: wrap; gap: 10px; }
       .swatches button { width: 44px; height: 44px; padding: 0; border-radius: 50%; border: 2px solid var(--divider-color); }
-      .swatches button[aria-pressed="true"] { border-color: var(--primary-text-color); }
+      .swatches button[aria-pressed="true"] { border-color: #1d1f24; box-shadow: 0 0 0 2px var(--primary-text-color); }
+      .yaml { margin: 20px 0 0; border-radius: 16px; background: var(--glass); border: 1px solid var(--glass-edge); }
+      .yaml summary { cursor: pointer; padding: 12px 16px; font-size: 0.9rem; color: var(--secondary-text-color); }
+      .yaml summary:hover { color: var(--primary-text-color); }
+      .yaml pre { margin: 0; padding: 0 16px 16px; overflow-x: auto; font-family: var(--code-font-family); font-size: 0.8rem; line-height: 1.5; }
       #toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 120px); background: rgba(40, 42, 48, 0.85); border: 1px solid var(--glass-edge); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); color: #fff; padding: 12px 18px; border-radius: 22px; max-width: calc(100vw - 48px); transition: transform 0.25s; font-size: 0.9rem; }
       #toast.shown { transform: translate(-50%, 0); }
       @keyframes rise { from { opacity: 0; transform: translateY(12px) scale(0.97); } }
@@ -115,7 +125,7 @@
         <h1>Your room, in 3D, <span>on your dashboard.</span></h1>
         <p class="lede">
           A Home Assistant card that shows a scan of your actual room with every light and sensor pinned where it really is.
-          Tap the lamp and the lamp turns on, and that part of the room brightens with it.
+          Tap a lamp to switch it, and that part of the room goes dark or lights up with it.
         </p>
         <p class="note">
           This is the real card running on a scan of a real playroom. The home behind it is simulated in your browser, so nothing
@@ -137,6 +147,10 @@
           <ul id="home-list"></ul>
         </aside>
       </main>
+      <details class="yaml">
+        <summary>This card's YAML</summary>
+        <pre id="yaml"></pre>
+      </details>
       <footer class="outro">
         <p><strong>Want it for your own rooms?</strong> Scan a room with your phone, install the card with HACS, and place your pins in the editor you just tried.</p>
         <a class="cta" href="https://github.com/Booyaka101/roomtwin#readme">Set it up</a>

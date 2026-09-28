@@ -77,7 +77,7 @@ export async function saveCard(
   }
   const paths = findCard(dashboard, old);
   if (paths.length === 0) {
-    throw new SaveError("Couldn't find this card in the saved dashboard. It may have been changed in another tab; reload the page to pick that up.");
+    throw new SaveError("Couldn't find this card in the saved dashboard. It may have been changed in another tab, so reload the page to pick that up. A card made by a template or another card can't be saved from here.");
   }
   if (paths.length > 1) {
     throw new SaveError("The dashboard has more than one card with exactly this config, so it isn't clear which one to change.");

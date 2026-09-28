@@ -12,6 +12,7 @@ interface Binding {
 interface DemoFile {
   config: { lights?: Binding[]; pins?: Binding[] } & Record<string, unknown>;
   states: StateOverrides;
+  yaml: string;
 }
 
 interface ActionConfig {
@@ -20,6 +21,7 @@ interface ActionConfig {
   perform_action?: string;
   service?: string;
   data?: Record<string, unknown>;
+  service_data?: Record<string, unknown>;
   target?: Record<string, unknown>;
 }
 
@@ -31,7 +33,12 @@ interface RoomTwinCardElement extends HTMLElement {
 let icons: Record<string, string> = {};
 
 function iconSvg(name: string) {
-  return svg`<svg viewBox="0 0 24 24" aria-hidden="true"><path d=${icons[name] ?? icons["mdi:bookmark"]}></path></svg>`;
+  return svg`<svg viewBox="0 0 24 24" aria-hidden="true"><path d=${icons[name]}></path></svg>`;
+}
+
+/** The binding's icon when the page packed it, otherwise the one HA would pick for the entity. */
+function iconFor(stateObj: HassEntity, icon: string | undefined): string {
+  return icon && icons[icon] ? icon : defaultIcon(stateObj);
 }
 
 // Stand-ins for the three Home Assistant elements the card renders. Everything else is the shipped card.
@@ -54,7 +61,7 @@ class DemoStateIcon extends HTMLElement {
       html`<style>
           svg { display: block; width: var(--mdc-icon-size, 24px); height: var(--mdc-icon-size, 24px); fill: currentColor; }
         </style>
-        ${iconSvg(this._icon ?? defaultIcon(this._stateObj))}`,
+        ${iconSvg(iconFor(this._stateObj, this._icon))}`,
       root,
     );
   }
@@ -193,14 +200,14 @@ async function main(): Promise<void> {
   }
 }
 
-function start({ config, states }: DemoFile, slot: HTMLElement): void {
+function start({ config, states, yaml }: DemoFile, slot: HTMLElement): void {
   const card = document.createElement("roomtwin-card") as RoomTwinCardElement;
   const panel = document.getElementById("home-list")!;
   const dialog = document.getElementById("more-info") as HTMLDialogElement;
   let moreInfo = "";
 
   const bindings = [...(config.lights ?? []), ...(config.pins ?? [])];
-  const iconOf = (stateObj: HassEntity) => bindings.find((b) => b.entity === stateObj.entity_id)?.icon ?? defaultIcon(stateObj);
+  const iconOf = (stateObj: HassEntity) => iconFor(stateObj, bindings.find((b) => b.entity === stateObj.entity_id)?.icon);
   const home = new SimHome(bindings.map((b) => b.entity), states, (hass) => {
     card.hass = hass;
     draw();
@@ -244,20 +251,29 @@ function start({ config, states }: DemoFile, slot: HTMLElement): void {
     else if (kind === "toggle") toast(`${entity} is not in this demo home`);
     else if ((kind === "perform-action" || kind === "call-service") && perform?.includes(".")) {
       const [domain, service] = perform.split(".");
-      call(domain, service, { ...rest.data, ...rest.target });
+      call(domain, service, { ...rest.service_data, ...rest.data, ...rest.target });
     } else if (kind !== "none") toast(`${kind} works in Home Assistant, not in this demo`);
   });
   card.addEventListener("hass-notification", (e) => toast((e as CustomEvent<{ message: string }>).detail.message));
   dialog.addEventListener("close", () => (moreInfo = ""));
-  // A click on the dimmed page around the dialog lands on the dialog element itself, outside its box.
-  dialog.addEventListener("click", (e) => {
+  // A click on the dimmed page around the dialog lands on the dialog element itself, outside its box. Both ends
+  // of the click have to be out there, or selecting text in the dialog and letting go outside would close it.
+  const outside = (e: MouseEvent) => {
     const box = dialog.getBoundingClientRect();
-    const outside = e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom;
-    if (e.target === dialog && outside) dialog.close();
+    return e.target === dialog && (e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom);
+  };
+  let pressedOutside = false;
+  dialog.addEventListener("pointerdown", (e) => (pressedOutside = outside(e)));
+  dialog.addEventListener("click", (e) => {
+    if (pressedOutside && outside(e)) dialog.close();
   });
+  document.getElementById("yaml")!.textContent = yaml;
   slot.replaceChildren(card);
   draw();
-  setInterval(() => home.drift(), 5000);
+  setInterval(() => {
+    home.drift();
+    home.stir();
+  }, 5000);
 }
 
 main();

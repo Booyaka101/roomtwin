@@ -7,8 +7,7 @@ export type Rgb = [number, number, number];
 
 // HA also reports rgb_color for a white bulb in color_temp mode, but the capture already shows that warmth.
 const COLOR_MODES = new Set(["hs", "xy", "rgb", "rgbw", "rgbww"]);
-// How far a colour pulls the other channels down. At 1 a pure red bulb would black out everything that isn't red,
-// where a real one leaves the room lit by daylight and other lamps, just redder.
+// How far a colour pulls the other channels down. At 1 a saturated bulb would black out the other channels.
 const TINT = 0.75;
 
 function validRgb(value: unknown): value is Rgb {

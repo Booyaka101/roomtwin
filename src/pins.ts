@@ -26,9 +26,16 @@ export function projectToScreen(world: THREE.Vector3, camera: THREE.Camera, widt
 }
 
 export interface PinBox extends ScreenPoint {
-  /** The round icon's diameter. The icon is centred on the point and the label runs to its right. */
+  /** The round icon's diameter. The icon is centred on the point. */
   size: number;
   labelWidth: number;
+  /** The label runs to the left of the icon instead of the right. */
+  flipped?: boolean;
+}
+
+/** Whether a label would be cut off at the right edge and fits on the left instead. */
+export function flipsLabel({ x, size, labelWidth }: PinBox, width: number): boolean {
+  return labelWidth > 0 && x + size / 2 + labelWidth > width && x - size / 2 - labelWidth >= 0;
 }
 
 /** Which pins hide their label: those whose label would run into a nearer pin. Nearer pins keep theirs. */
@@ -37,13 +44,11 @@ export function tuckedLabels(boxes: PinBox[]): boolean[] {
   const placed: { left: number; right: number; top: number; bottom: number }[] = [];
   const order = boxes.flatMap((b, i) => (b.visible ? [i] : [])).sort((a, b) => boxes[a].depth - boxes[b].depth);
   for (const i of order) {
-    const { x, y, size, labelWidth } = boxes[i];
-    const left = x - size / 2;
-    const top = y - size / 2;
-    const bottom = y + size / 2;
-    const full = left + size + labelWidth;
-    tucked[i] = labelWidth > 0 && placed.some((r) => left < r.right && full > r.left && top < r.bottom && bottom > r.top);
-    placed.push({ left, right: tucked[i] ? left + size : full, top, bottom });
+    const { x, y, size, labelWidth, flipped } = boxes[i];
+    const icon = { left: x - size / 2, right: x + size / 2, top: y - size / 2, bottom: y + size / 2 };
+    const full = flipped ? { ...icon, left: icon.left - labelWidth } : { ...icon, right: icon.right + labelWidth };
+    tucked[i] = labelWidth > 0 && placed.some((r) => full.left < r.right && full.right > r.left && full.top < r.bottom && full.bottom > r.top);
+    placed.push(tucked[i] ? icon : full);
   }
   return tucked;
 }

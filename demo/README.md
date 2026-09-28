@@ -11,7 +11,9 @@ The scan becomes public the moment you push it, and anyone can download the file
 
 ## Simulated devices
 
-Every entity in the config gets a believable state from its id: `light.*`, `switch.*`, `fan.*` and `input_boolean.*` toggle, covers open and close, locks lock, scenes and scripts run, buttons press. Sensors are guessed from words in the id (`temperature` or `temp`, `humidity`, `power`, `energy`, `illuminance` or `lux`, `battery`, `co2`). Temperature, humidity, power, light level and CO2 drift a little every few seconds; energy and battery hold still. Binary sensors named with `door`, `window`, `garage`, `gate`, `motion`, `occupancy`, `moisture` or `smoke` get that device class, so a door pin turns red when it's opened from the side panel.
+Every entity in the config gets a believable state from its id: `light.*`, `switch.*`, `fan.*` and `input_boolean.*` toggle, covers open and close, locks lock, scenes and scripts run, buttons press. Sensors are guessed from words in the id (`temperature` or `temp`, `humidity`, `power`, `energy`, `illuminance` or `lux`, `battery`, `co2`). Temperature, humidity, power, light level and CO2 drift a little every few seconds; energy and battery hold still. Binary sensors named with `door`, `window`, `garage`, `gate`, `motion`, `occupancy`, `moisture` or `smoke` get that device class, so a door pin turns red when it's opened from the side panel. Motion and occupancy sensors see someone every minute or so and clear 20 seconds later.
+
+An `icon` the page can't draw (anything that isn't `mdi:`, or a name missing from `@mdi/js`) gets a warning at build time, and its pin shows the entity's usual icon instead. The page also shows the card's YAML under the room, as you wrote it.
 
 To change a name or a starting state, add `demo/states.yaml`:
 

@@ -100,7 +100,10 @@ await bundle.close();
 copyFileSync(join(root, "demo", "index.html"), join(out, "index.html"));
 copyFileSync(card, join(out, "roomtwin-card.js"));
 copyFileSync(splat, join(out, `room.${splatExt}`));
-writeFileSync(join(out, "config.json"), JSON.stringify({ config: { ...config, splat: `room.${splatExt}` }, states }));
+writeFileSync(
+  join(out, "config.json"),
+  JSON.stringify({ config: { ...config, splat: `room.${splatExt}` }, states, yaml: readFileSync(configPath, "utf8").trim() }),
+);
 writeFileSync(join(out, ".nojekyll"), "");
 
 // Only the icons the page can show get packed, instead of all 7000 MDI paths.
@@ -111,11 +114,11 @@ for (const binding of [...(config.lights ?? []), ...(config.pins ?? [])]) {
 const icons = {};
 for (const name of names) {
   const path = mdiPath(name);
-  if (!path) fail(`${name} is not an MDI icon the demo can draw. Check the spelling at https://pictogrammers.com/library/mdi/.`);
-  icons[name] = path;
+  if (path) icons[name] = path;
+  else console.warn(`demo: ${name} is not an MDI icon the demo can draw, so its pin shows the entity's usual icon.`);
 }
 writeFileSync(join(out, "icons.json"), JSON.stringify(icons));
-console.log(`demo: built ${args.out}/ with ${splat.startsWith(root + sep) ? relative(root, splat).split(sep).join("/") : splat} (${splatMb.toFixed(1)} MB) and ${names.size} icons`);
+console.log(`demo: built ${args.out}/ with ${splat.startsWith(root + sep) ? relative(root, splat).split(sep).join("/") : splat} (${splatMb.toFixed(1)} MB) and ${Object.keys(icons).length} icons`);
 
 if (args.serve) {
   const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".json": "application/json" };

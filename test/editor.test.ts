@@ -128,6 +128,7 @@ describe("toYaml", () => {
     expect(card.pins[0].anchor).toEqual([0.3, 0, 0]);
     expect(card.pins[0].tap_action.data.brightness_pct).toBe(0.123456789);
     expect(card.visibility[0].above).toBe(20.000012345);
+    expect(parse(toYaml(config))).toEqual(card);
   });
 
   test("keys that YAML would misread are quoted, and empty mappings survive", () => {

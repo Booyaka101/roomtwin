@@ -27,7 +27,7 @@ test("entities get a plausible starting state from their id", () => {
   expect(guessEntity("binary_sensor.front_gate", NOW).attributes.device_class).toBe("opening");
   expect(guessEntity("binary_sensor.indoor_motion", NOW).attributes.device_class).toBe("motion");
   expect(guessEntity("cover.garage_door", NOW)).toMatchObject({ state: "closed", attributes: { device_class: "garage" } });
-  expect(guessEntity("scene.movie_time", NOW).state).toBe(NOW);
+  expect(guessEntity("scene.movie_time", NOW).state).toBe("unknown");
   expect(guessEntity("button.doorbell", NOW).state).toBe("unknown");
   expect(guessEntity("script.bedtime", NOW).state).toBe("off");
   expect(guessEntity("lock.front", NOW).state).toBe("locked");
@@ -64,7 +64,7 @@ test("a light off has no brightness or colour, and turned back on looks as it di
   await sim.callService("light", "toggle", { entity_id: "light.lamp" });
   expect(sim.states["light.lamp"]).toMatchObject({ state: "on", attributes: { brightness: 40, rgb_color: [255, 0, 0], color_mode: "hs" } });
   await sim.callService("light", "turn_on", { entity_id: "light.shelf" });
-  expect(sim.states["light.shelf"].attributes).toMatchObject({ brightness: 255, color_mode: "hs" });
+  expect(sim.states["light.shelf"].attributes).toMatchObject({ brightness: 255, color_mode: "color_temp", color_temp_kelvin: 3000 });
 });
 
 test("covers pass through opening and closing, scripts run and stop", async () => {
@@ -97,6 +97,33 @@ test("a tap on a moving cover stops it, and a newer command replaces the pending
   vi.advanceTimersByTime(500);
   expect(sim.states["cover.shutter"].state).toBe("closed");
   expect(sim.states["cover.blind"].state).toBe("open");
+});
+
+test("a target with several entities runs the service on each, and brightness_pct sets brightness", async () => {
+  const { sim } = home(["light.a", "light.b"], { "light.b": { state: "off" } });
+  await sim.callService("light", "turn_on", { entity_id: ["light.a", "light.b"], brightness_pct: 40, transition: 2 });
+  expect(sim.states["light.a"]).toMatchObject({ state: "on", attributes: { brightness: 102 } });
+  expect(sim.states["light.b"]).toMatchObject({ state: "on", attributes: { brightness: 102 } });
+  expect(sim.states["light.a"].attributes).not.toHaveProperty("transition");
+});
+
+test("stopping a cover that isn't moving leaves it be", async () => {
+  const { sim, seen } = home(["cover.blind"]);
+  await sim.callService("cover", "stop_cover", { entity_id: "cover.blind" });
+  expect(sim.states["cover.blind"].state).toBe("closed");
+  expect(seen).toHaveLength(0);
+});
+
+test("motion sensors trip now and then and clear 20 seconds later, other sensors stay put", () => {
+  vi.useFakeTimers();
+  const { sim } = home(["binary_sensor.hall_motion", "binary_sensor.balcony_door"]);
+  sim.stir(() => 0.5);
+  expect(sim.states["binary_sensor.hall_motion"].state).toBe("off");
+  sim.stir(() => 0);
+  expect(sim.states["binary_sensor.hall_motion"].state).toBe("on");
+  expect(sim.states["binary_sensor.balcony_door"].state).toBe("off");
+  vi.advanceTimersByTime(20_000);
+  expect(sim.states["binary_sensor.hall_motion"].state).toBe("off");
 });
 
 test("dispose cancels pending transitions", async () => {
@@ -172,7 +199,10 @@ test("states read the way HA's frontend writes them", () => {
   expect(formatState({ ...guessEntity("binary_sensor.hall_motion", NOW), state: "on" })).toBe("Detected");
   expect(formatState({ ...guessEntity("binary_sensor.thing", NOW), state: "on" })).toBe("On");
   expect(formatState(guessEntity("button.doorbell", NOW))).toBe("Never used");
-  expect(formatState(guessEntity("scene.movie", NOW))).toMatch(/^Last run /);
+  expect(formatState(guessEntity("scene.movie", NOW))).toBe("Unknown");
+  expect(formatState({ ...guessEntity("scene.movie", NOW), state: NOW })).toMatch(/^Last run /);
+  expect(formatState(guessEntity("sensor.humidity", NOW))).toBe("46%");
+  expect(formatState({ ...guessEntity("sensor.temperature", NOW), state: "unavailable" })).toBe("Unavailable");
   expect(formatState(guessEntity("cover.blind", NOW))).toBe("Closed");
   expect(formatState({ ...guessEntity("media_player.tv", NOW), state: "playing" })).toBe("Playing");
 });

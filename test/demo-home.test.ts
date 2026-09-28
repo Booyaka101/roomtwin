@@ -27,6 +27,8 @@ test("entities get a plausible starting state from their id", () => {
   expect(guessEntity("binary_sensor.front_gate", NOW).attributes.device_class).toBe("opening");
   expect(guessEntity("binary_sensor.indoor_motion", NOW).attributes.device_class).toBe("motion");
   expect(guessEntity("cover.garage_door", NOW)).toMatchObject({ state: "closed", attributes: { device_class: "garage" } });
+  expect(guessEntity("cover.lounge_curtains", NOW).attributes.device_class).toBe("curtain");
+  expect(guessEntity("cover.playroom_blind", NOW).attributes.device_class).toBe("blind");
   expect(guessEntity("scene.movie_time", NOW).state).toBe("unknown");
   expect(guessEntity("button.doorbell", NOW).state).toBe("unknown");
   expect(guessEntity("script.bedtime", NOW).state).toBe("off");
@@ -213,6 +215,8 @@ test("default icons follow the domain, device class and state", () => {
   expect(defaultIcon(guessEntity("binary_sensor.balcony_door", NOW))).toBe("mdi:door-closed");
   expect(defaultIcon({ ...guessEntity("binary_sensor.balcony_door", NOW), state: "on" })).toBe("mdi:door-open");
   expect(defaultIcon(guessEntity("cover.garage_door", NOW))).toBe("mdi:garage");
+  expect(defaultIcon(guessEntity("cover.playroom_blind", NOW))).toBe("mdi:blinds-horizontal-closed");
+  expect(defaultIcon({ ...guessEntity("cover.bedroom_shade", NOW), state: "open" })).toBe("mdi:roller-shade");
   expect(defaultIcon(guessEntity("sensor.mystery", NOW))).toBe("mdi:eye");
   expect(defaultIcon(guessEntity("vacuum.robbie", NOW))).toBe("mdi:robot-vacuum");
   expect(defaultIcon(guessEntity("weather.home", NOW))).toBe("mdi:bookmark");

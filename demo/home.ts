@@ -14,8 +14,17 @@ const SENSOR_CLASSES: Record<string, { state: string; unit: string; step: number
 };
 const OPENINGS = ["garage_door", "garage", "gate", "door", "window"];
 const BINARY_CLASSES = [...OPENINGS, "motion", "occupancy", "moisture", "smoke"];
-// Words in an entity id that name a sensor's device class without the usual spelling.
-const CLASS_ALIASES: Record<string, string> = { temp: "temperature", lux: "illuminance", co2: "carbon_dioxide" };
+const COVER_CLASSES = [...OPENINGS, "blind", "curtain", "shade", "shutter"];
+// Words in an entity id that name a device class without the usual spelling.
+const CLASS_ALIASES: Record<string, string> = {
+  temp: "temperature",
+  lux: "illuminance",
+  co2: "carbon_dioxide",
+  blinds: "blind",
+  curtains: "curtain",
+  shades: "shade",
+  shutters: "shutter",
+};
 const TOGGLES = new Set(["light", "switch", "fan", "input_boolean"]);
 // HA clears these while a light is off and brings them back when it turns on again.
 const OFF_LOOK = { brightness: null, rgb_color: null, color_temp_kelvin: null, color_mode: null };
@@ -65,7 +74,7 @@ export function guessEntity(entityId: string, now = new Date().toISOString()): H
     if (cls) attributes.device_class = ({ garage: "garage_door", gate: "opening" } as Record<string, string>)[cls] ?? cls;
   } else if (domain === "cover") {
     state = "closed";
-    const cls = guessClass(entityId, OPENINGS);
+    const cls = guessClass(entityId, COVER_CLASSES);
     if (cls) attributes.device_class = cls === "garage_door" ? "garage" : cls;
   } else if (domain === "scene" || domain === "button" || domain === "input_button") {
     state = "unknown";

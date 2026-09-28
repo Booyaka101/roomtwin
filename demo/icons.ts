@@ -25,6 +25,9 @@ const CLASSES: Record<string, Record<string, Pair>> = {
     gate: ["mdi:gate-open", "mdi:gate"],
     door: ["mdi:door-open", "mdi:door-closed"],
     window: ["mdi:window-open", "mdi:window-closed"],
+    blind: ["mdi:blinds-horizontal", "mdi:blinds-horizontal-closed"],
+    curtain: ["mdi:curtains", "mdi:curtains-closed"],
+    shade: ["mdi:roller-shade", "mdi:roller-shade-closed"],
     "": ["mdi:window-shutter-open", "mdi:window-shutter"],
   },
   binary_sensor: {

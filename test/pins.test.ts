@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as THREE from "three";
-import { DOUBLE_TAP_MS, HOLD_MS, PressGesture, activeColor, pinLabel, pinState, projectToScreen, spokenState, tapService } from "../src/pins";
+import { DOUBLE_TAP_MS, HOLD_MS, PressGesture, activeColor, pinLabel, pinState, projectToScreen, spokenState, tapService, tuckedLabels, type PinBox } from "../src/pins";
 import type { HomeAssistant } from "../src/hass";
 import { entity } from "./helpers";
 
@@ -217,5 +217,34 @@ describe("PressGesture", () => {
     expect(onTap).toHaveBeenCalledOnce();
     expect(onHold).toHaveBeenCalledOnce();
     expect(onDoubleTap).not.toHaveBeenCalled();
+  });
+});
+
+describe("tuckedLabels", () => {
+  const box = (x: number, y: number, depth: number, labelWidth = 60): PinBox => ({ x, y, depth, visible: true, size: 36, labelWidth });
+
+  test("pins far apart keep their labels", () => {
+    expect(tuckedLabels([box(100, 100, 2), box(300, 100, 3), box(100, 300, 1)])).toEqual([false, false, false]);
+  });
+
+  test("the farther pin tucks its label when it runs into a nearer pin, whichever comes first in the config", () => {
+    expect(tuckedLabels([box(100, 100, 2), box(140, 105, 3)])).toEqual([false, true]);
+    expect(tuckedLabels([box(140, 105, 3), box(100, 100, 2)])).toEqual([true, false]);
+  });
+
+  test("a label only counts to the right of its icon", () => {
+    // The nearer pin's label runs away from the farther one, and the farther one's label clears it.
+    expect(tuckedLabels([box(200, 100, 1), box(100, 100, 2, 50)])).toEqual([false, false]);
+    expect(tuckedLabels([box(200, 100, 1), box(100, 100, 2, 70)])).toEqual([false, true]);
+  });
+
+  test("a tucked label frees its space, and hidden pins take none", () => {
+    // 1 tucks behind 0, so 2 only has to clear 1's icon.
+    expect(tuckedLabels([box(100, 100, 1), box(150, 100, 2), box(200, 100, 3)])).toEqual([false, true, false]);
+    expect(tuckedLabels([{ ...box(100, 100, 1), visible: false }, box(140, 100, 2)])).toEqual([false, false]);
+  });
+
+  test("pins without a label never tuck", () => {
+    expect(tuckedLabels([box(100, 100, 1), box(110, 100, 2, 0)])).toEqual([false, false]);
   });
 });

@@ -48,6 +48,9 @@ if (!existsSync(configPath)) {
 }
 const config = readYaml(configPath, "The card config");
 if (typeof config !== "object" || Array.isArray(config)) fail(`${args.config} must be the card's YAML mapping.`);
+for (const key of ["lights", "pins"]) {
+  if (config[key] != null && !Array.isArray(config[key])) fail(`${key} in ${args.config} must be a list.`);
+}
 
 const splat = args.splat
   ? resolve(root, args.splat)
@@ -73,6 +76,7 @@ if (typeof states !== "object" || Array.isArray(states)) fail(`${statesPath} mus
 
 const out = resolve(root, args.out);
 if (out === root || !out.startsWith(root + sep)) fail(`--out must be a folder inside the repo, got ${args.out}.`);
+if (existsSync(out) && !statSync(out).isDirectory()) fail(`--out must be a folder, and ${args.out} is a file.`);
 // The folder is emptied first, so never take one this script didn't make.
 if (existsSync(out) && readdirSync(out).length && !existsSync(join(out, "config.json"))) {
   fail(`${args.out} already has other files in it. Pick an empty or new folder for --out.`);

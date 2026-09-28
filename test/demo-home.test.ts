@@ -123,7 +123,7 @@ test("scenes and buttons record when they ran, locks lock", async () => {
 test("services the demo can't simulate, and unknown entities, reject with a message", async () => {
   const { sim, seen } = home(["light.lamp", "sensor.temp"]);
   await expect(sim.callService("light", "turn_on", { entity_id: "light.gone" })).rejects.toThrow("light.gone is not in this demo home");
-  await expect(sim.callService("light", "turn_on")).rejects.toThrow("No entity is not in this demo home");
+  await expect(sim.callService("light", "turn_on")).rejects.toThrow("light.turn_on needs an entity_id in this demo");
   await expect(sim.callService("sensor", "reload", { entity_id: "sensor.temp" })).rejects.toThrow("sensor.reload isn't simulated in this demo");
   expect(seen).toHaveLength(0);
 });

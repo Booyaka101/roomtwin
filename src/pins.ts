@@ -25,6 +25,29 @@ export function projectToScreen(world: THREE.Vector3, camera: THREE.Camera, widt
   return { x, y, visible, depth };
 }
 
+export interface PinBox extends ScreenPoint {
+  /** The round icon's diameter. The icon is centred on the point and the label runs to its right. */
+  size: number;
+  labelWidth: number;
+}
+
+/** Which pins hide their label: those whose label would run into a nearer pin. Nearer pins keep theirs. */
+export function tuckedLabels(boxes: PinBox[]): boolean[] {
+  const tucked = boxes.map(() => false);
+  const placed: { left: number; right: number; top: number; bottom: number }[] = [];
+  const order = boxes.flatMap((b, i) => (b.visible ? [i] : [])).sort((a, b) => boxes[a].depth - boxes[b].depth);
+  for (const i of order) {
+    const { x, y, size, labelWidth } = boxes[i];
+    const left = x - size / 2;
+    const top = y - size / 2;
+    const bottom = y + size / 2;
+    const full = left + size + labelWidth;
+    tucked[i] = labelWidth > 0 && placed.some((r) => left < r.right && full > r.left && top < r.bottom && bottom > r.top);
+    placed.push({ left, right: tucked[i] ? left + size : full, top, bottom });
+  }
+  return tucked;
+}
+
 const TOGGLE_DOMAINS = new Set(["light", "switch", "cover", "fan", "input_boolean"]);
 const PRESS_SERVICES = new Map([
   ["scene", "turn_on"],

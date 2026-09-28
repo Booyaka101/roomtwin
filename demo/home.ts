@@ -112,7 +112,8 @@ export class SimHome {
       const extra = overrides[id] ?? {};
       const stateObj = (this.states[id] = {
         ...guess,
-        state: extra.state ?? guess.state,
+        // YAML reads an unquoted 12 as a number, and HA states are always strings.
+        state: extra.state == null ? guess.state : String(extra.state),
         attributes: { ...guess.attributes, ...extra.attributes },
       });
       if (domainOf(id) === "light" && stateObj.state === "off") this.dim(stateObj);
@@ -161,7 +162,7 @@ export class SimHome {
   async callService(domain: string, service: string, data: Record<string, unknown> = {}): Promise<void> {
     const id = String(data.entity_id ?? "");
     const stateObj = this.states[id];
-    if (!stateObj) throw new Error(`${id || "No entity"} is not in this demo home`);
+    if (!stateObj) throw new Error(id ? `${id} is not in this demo home` : `${domain}.${service} needs an entity_id in this demo`);
     const on = stateObj.state === "on";
     const { entity_id: _, ...attrs } = data;
     if (TOGGLES.has(domain) && ["toggle", "turn_on", "turn_off"].includes(service)) {

@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing, type PropertyValues } from "lit";
 import { live } from "lit/directives/live.js";
-import { ENTITY_ID, ICON, LIGHT_DEFAULTS, bindingRefs, type CameraView, type LightBinding, type PinBinding, type RoomTwinConfig, type Vec3 } from "./config";
+import { ENTITY_ID, ICON, LIGHT_DEFAULTS, bindingRefs, type BindingRef, type CameraView, type LightBinding, type PinBinding, type RoomTwinConfig, type Vec3 } from "./config";
 import { SaveError } from "./dashboard";
 import { domainOf, type HomeAssistant } from "./hass";
 
@@ -183,14 +183,22 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
+// Configs are replaced, never changed in place, so each one's YAML only needs working out once.
+const yamlCache = new WeakMap<RoomTwinConfig, string>();
+function yamlOf(config: RoomTwinConfig): string {
+  let yaml = yamlCache.get(config);
+  if (yaml === undefined) yamlCache.set(config, (yaml = toYaml(config)));
+  return yaml;
+}
+
 export const LIGHT_DOMAINS = new Set(["light", "switch"]);
 
-export type Selection = { kind: "light" | "pin"; index: number };
+export type Selected = Pick<BindingRef, "kind" | "index">;
 
 export interface HelperDetail {
   anchor: Vec3 | null;
   radius: number;
-  selected: Selection | null;
+  selected: Selected | null;
 }
 
 /**
@@ -214,6 +222,7 @@ export class RoomTwinEditor extends LitElement {
     _saving: { state: true },
     _saveError: { state: true },
     _history: { state: true },
+    _typo: { state: true },
   };
 
   hass!: HomeAssistant;
@@ -223,7 +232,7 @@ export class RoomTwinEditor extends LitElement {
   getView!: () => CameraView;
   /** Height of the room's top above the floor, from the splat itself. */
   getRoomHeight!: () => number;
-  private _selected: Selection | null = null;
+  private _selected: Selected | null = null;
   private _pending: Vec3 | null = null;
   private _floorPoints: Vec3[] | null = null;
   private _entity = "";
@@ -234,6 +243,8 @@ export class RoomTwinEditor extends LitElement {
   private _saving = false;
   private _saveError = "";
   private _history: RoomTwinConfig[] = [];
+  /** An icon name that didn't pass, kept in its field so it can be corrected rather than retyped. */
+  private _typo: { for: Selected; value: string } | null = null;
   // A slider drag is one step to undo, not one per pixel.
   private dragging = "";
   // Sorted when the entity picker opens, not on every state update while it's open.
@@ -288,6 +299,7 @@ export class RoomTwinEditor extends LitElement {
   }
 
   protected updated(changed: PropertyValues): void {
+    if (changed.has("_pending") && this._pending) this.renderRoot.querySelector<HTMLInputElement>("input.entity")?.focus();
     if (changed.has("_selected") || changed.has("_pending") || changed.has("config")) {
       this.dispatchEvent(new CustomEvent<HelperDetail>("helper-changed", { detail: this.helper() }));
     }
@@ -322,7 +334,7 @@ export class RoomTwinEditor extends LitElement {
   /** The undo history, minus a last step that changed nothing, like a slider let go where it started. */
   private steps(): RoomTwinConfig[] {
     const last = this._history[this._history.length - 1];
-    return last && toYaml(last) === toYaml(this.config) ? this._history.slice(0, -1) : this._history;
+    return last && yamlOf(last) === yamlOf(this.config) ? this._history.slice(0, -1) : this._history;
   }
 
   private undo(): void {
@@ -376,7 +388,7 @@ export class RoomTwinEditor extends LitElement {
 
   private async copy(): Promise<void> {
     this._saveError = "";
-    this._copied = (await copyText(toYaml(this.config))) ? "ok" : "failed";
+    this._copied = (await copyText(yamlOf(this.config))) ? "ok" : "failed";
   }
 
   private async onSave(): Promise<void> {
@@ -429,20 +441,26 @@ export class RoomTwinEditor extends LitElement {
   }
 
   private textField(label: string, key: "name" | "icon", placeholder: string) {
-    const { kind, index } = this._selected!;
+    const selected = this._selected!;
+    const typo = key === "icon" && this._typo?.for === selected ? this._typo.value : undefined;
     return html`<label class="slider"
       ><span>${label}</span
       ><input
-        .value=${live(this.selectedBinding()?.[key] ?? "")}
+        .value=${live(typo ?? this.selectedBinding()?.[key] ?? "")}
         placeholder=${placeholder}
+        autocapitalize=${key === "icon" ? "off" : nothing}
+        autocorrect=${key === "icon" ? "off" : nothing}
+        spellcheck=${key === "icon" ? "false" : nothing}
         @change=${(e: Event) => {
           const value = (e.target as HTMLInputElement).value.trim();
           if (key === "icon" && value && !ICON.test(value)) {
+            this._typo = { for: selected, value };
             this._message = `${value} is not an icon name. Icons look like mdi:lamp.`;
             return;
           }
+          this._typo = null;
           this._message = "";
-          this.commit(this.withBinding(kind, index, { [key]: value || undefined }));
+          this.commit(this.withBinding(selected.kind, selected.index, { [key]: value || undefined }));
         }}
     /></label>`;
   }
@@ -460,6 +478,10 @@ export class RoomTwinEditor extends LitElement {
         <input
           class="entity"
           list="entities"
+          aria-label="Entity id"
+          autocapitalize="off"
+          autocorrect="off"
+          spellcheck="false"
           placeholder="light.floor_lamp"
           .value=${this._entity}
           @input=${(e: Event) => (this._entity = (e.target as HTMLInputElement).value)}
@@ -475,7 +497,7 @@ export class RoomTwinEditor extends LitElement {
         <div class="row">
           <button ?disabled=${!valid || !LIGHT_DOMAINS.has(domainOf(entity))} @click=${() => this.add("light")}>Add as light</button>
           <button ?disabled=${!valid} @click=${() => this.add("pin")}>Add as pin</button>
-          <button @click=${() => (this._pending = null)}>Cancel</button>
+          <button @click=${() => ((this._pending = null), (this._entity = ""))}>Cancel</button>
         </div>`;
     }
     const binding = this.selectedBinding();
@@ -488,7 +510,7 @@ export class RoomTwinEditor extends LitElement {
             ${this.slider("Brightness when off", "off_dim", 0, 1, 0.01)}`
           : nothing}
         ${this.textField("Label", "name", this.hass.states[binding.entity]?.attributes.friendly_name ?? "")}
-        ${this.textField("Icon", "icon", "mdi:lamp")}
+        ${this.textField("Icon", "icon", String(this.hass.states[binding.entity]?.attributes.icon ?? "The entity's icon"))}
         <div class="row">
           <button @click=${() => (this._selected = null)}>Done</button>
           <button class="danger" @click=${this.removeSelected}>Remove</button>
@@ -526,6 +548,7 @@ export class RoomTwinEditor extends LitElement {
             ${bindings.map(
               (b) => html`<button
                 class=${this._selected?.kind === b.kind && this._selected.index === b.index ? "chip selected" : "chip"}
+                aria-pressed=${String(this._selected?.kind === b.kind && this._selected.index === b.index)}
                 @click=${() => this.select(b.kind, b.index)}
               >
                 <svg class=${b.kind} viewBox="0 0 24 24" aria-hidden="true"><path d=${b.kind === "light" ? MDI_LIGHTBULB : MDI_MAP_MARKER}></path></svg>
@@ -536,9 +559,9 @@ export class RoomTwinEditor extends LitElement {
         : nothing}
       <h3>Room</h3>
       <section class="room">
-        <label class="slider">
-          <span><input type="checkbox" .checked=${cut !== undefined} @change=${(e: Event) =>
-            this.commit({ ...this.config, ceiling_cut: (e.target as HTMLInputElement).checked ? suggestedCut : undefined })} /> Ceiling cut</span>
+        <div class="slider">
+          <label><input type="checkbox" .checked=${cut !== undefined} @change=${(e: Event) =>
+            this.commit({ ...this.config, ceiling_cut: (e.target as HTMLInputElement).checked ? suggestedCut : undefined })} /> Ceiling cut</label>
           <input
             type="range"
             min=${step * 10}
@@ -551,7 +574,7 @@ export class RoomTwinEditor extends LitElement {
             @change=${this.endDrag}
           />
           <output>${cut === undefined ? "off" : `${cut} m`}</output>
-        </label>
+        </div>
         <div class="row">
           <button @click=${() => (this.clearTask(), (this._floorPoints = []))}>
             Set floor (tap 3 points)
@@ -573,7 +596,7 @@ export class RoomTwinEditor extends LitElement {
       ${this.footerNote()}
       <details ?open=${this._copied === "failed"}>
         <summary>${this._copied === "failed" ? "Couldn't reach the clipboard. Select and copy this:" : "YAML"}</summary>
-        <textarea readonly rows="10" .value=${toYaml(this.config)}></textarea>
+        <textarea readonly rows="10" .value=${yamlOf(this.config)}></textarea>
       </details>
     `;
   }

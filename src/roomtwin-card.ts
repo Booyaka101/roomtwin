@@ -3,10 +3,10 @@ import { styleMap } from "lit/directives/style-map.js";
 import * as THREE from "three";
 import { aspectRatio, bindingRefs, parseConfig, type BindingRef, type RoomTwinConfig } from "./config";
 import { canSave, dashboardUrlPath, saveCard } from "./dashboard";
-import { toCardConfig, toYaml, type HelperDetail, type RoomTwinEditor, type Selection } from "./editor";
+import { toCardConfig, toYaml, type HelperDetail, type RoomTwinEditor, type Selected } from "./editor";
 import type { HassEntity, HomeAssistant } from "./hass";
 import { LightRig } from "./lights";
-import { PressGesture, activeColor, pinLabel, pinState, projectToScreen, spokenState, tapService } from "./pins";
+import { PressGesture, activeColor, pinLabel, pinState, projectToScreen, spokenState, tapService, tuckedLabels, type PinBox } from "./pins";
 import { RoomScene, SplatLoadError, webgl2Available, type Motion } from "./scene";
 import { VERSION } from "./version";
 
@@ -61,7 +61,7 @@ export class RoomTwinCard extends LitElement {
   private _warning = "";
   private _hint = "";
   // The editor's selection, ringed on the stage.
-  private _selected: Selection | null = null;
+  private _selected: Selected | null = null;
   private hintTimer?: ReturnType<typeof setTimeout>;
 
   private scene?: RoomScene;
@@ -339,7 +339,8 @@ export class RoomTwinCard extends LitElement {
     scene.setLodScale(config.lod_scale);
     this.lights.setBindings(config.lights);
     this.lights.applyStates(this._hass?.states ?? {});
-    scene.setView(view, motion ?? "jump");
+    // Editing mid-flight leaves the flight to land.
+    if (motion || !scene.flying) scene.setView(view, motion ?? "jump");
     scene.requestRender();
   }
 
@@ -350,14 +351,22 @@ export class RoomTwinCard extends LitElement {
     const width = host.clientWidth;
     const height = host.clientHeight;
     scene.camera.updateMatrixWorld();
-    this.pinEls.forEach((el, i) => {
+    // Every read before any write, so a frame lays the pins out once.
+    const boxes = this.pinEls.map((el, i): PinBox => {
       const pin = this.pins[i];
-      if (!pin) return;
-      const p = projectToScreen(scene.captureToWorld(pin.anchor, this.tmp), scene.camera, width, height);
-      el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -50%)`;
+      const p = pin ? projectToScreen(scene.captureToWorld(pin.anchor, this.tmp), scene.camera, width, height) : { x: 0, y: 0, depth: 0, visible: false };
+      const face = el.firstElementChild as HTMLElement | null;
+      const label = face?.querySelector<HTMLElement>(".label");
+      return { ...p, size: face?.offsetHeight ?? 0, labelWidth: label?.offsetWidth ?? 0 };
+    });
+    const tucked = tuckedLabels(boxes);
+    this.pinEls.forEach((el, i) => {
+      const p = boxes[i];
+      el.style.transform = `translate(${p.x - p.size / 2}px, ${p.y - p.size / 2}px)`;
       el.style.visibility = p.visible ? "" : "hidden";
       // Nearer pins on top, to the centimetre.
       el.style.zIndex = String(Math.max(0, Math.round(100_000 - p.depth * 100)));
+      el.classList.toggle("tucked", tucked[i]);
     });
   };
 
@@ -484,6 +493,16 @@ export class RoomTwinCard extends LitElement {
       if (e.touches.length > 1 && e.cancelable) e.preventDefault();
     },
   };
+
+  private resetView(): void {
+    this.scene?.setView(this.shown?.camera, "glide");
+  }
+
+  private onStageKey(e: KeyboardEvent): void {
+    if (e.key !== "Home") return;
+    e.preventDefault();
+    this.resetView();
+  }
 
   private onStageDown(e: PointerEvent): void {
     if (!e.isPrimary) this.handToControls();
@@ -629,6 +648,7 @@ export class RoomTwinCard extends LitElement {
       >
         <div
           class="canvas"
+          @keydown=${this.onStageKey}
           @pointerdown=${this.onStageDown}
           @pointerup=${this.onStageUp}
           @pointercancel=${this.onStageCancel}
@@ -652,7 +672,7 @@ export class RoomTwinCard extends LitElement {
         <div class="hint" role="status">${this._hint}</div>
         ${ready
           ? html`<div class="tools">
-              <button title="Reset view" aria-label="Reset view" @click=${() => this.scene?.setView(config.camera, "glide")}>
+              <button title="Reset view" aria-label="Reset view" @click=${this.resetView}>
                 <svg viewBox="0 0 24 24"><path d=${MDI_HOME}></path></svg>
               </button>
               ${hass?.user?.is_admin && !this._editing
@@ -778,6 +798,9 @@ export class RoomTwinCard extends LitElement {
     .pin:focus-visible {
       z-index: 1000000 !important;
     }
+    .pin.selected {
+      z-index: 999999 !important;
+    }
     .face {
       position: relative;
       display: flex;
@@ -799,6 +822,9 @@ export class RoomTwinCard extends LitElement {
       animation: pin-in 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.25) backwards;
       animation-delay: calc(min(var(--n), 12) * 40ms + 150ms);
     }
+    .editing .face {
+      animation-delay: 0s;
+    }
     .bubble {
       flex: none;
       display: flex;
@@ -814,6 +840,10 @@ export class RoomTwinCard extends LitElement {
     }
     .label {
       padding: 0 9px 0 3px;
+    }
+    .pin.tucked:not(:hover, :focus-visible, .selected) .label {
+      position: absolute;
+      visibility: hidden;
     }
     @media (hover: hover) {
       .pin:hover .face {
@@ -856,15 +886,22 @@ export class RoomTwinCard extends LitElement {
       animation: ring 1.8s ease-out infinite;
     }
     .pin.selected .face {
-      outline: 2px solid var(--primary-color, #03a9f4);
+      outline: 3px solid var(--primary-color, #03a9f4);
       outline-offset: 3px;
       transform: scale(1.1);
+    }
+    .pin.selected:active .face {
+      transform: scale(1.02);
     }
     .pin.missing .face,
     .pin.unavailable .face {
       border-style: dashed;
       border-color: rgba(255, 255, 255, 0.4);
-      color: rgba(255, 255, 255, 0.7);
+      border-color: color-mix(in srgb, currentColor 45%, transparent);
+    }
+    .pin.missing .face > *,
+    .pin.unavailable .face > * {
+      opacity: 0.7;
     }
     .pin svg {
       width: var(--mdc-icon-size);
@@ -912,8 +949,13 @@ export class RoomTwinCard extends LitElement {
       overflow: hidden;
       border-radius: inherit;
       background: var(--primary-color, #03a9f4);
-      background: linear-gradient(90deg, color-mix(in srgb, var(--primary-color, #03a9f4) 55%, white), var(--primary-color, #03a9f4));
       transition: width 0.3s ease;
+    }
+    /* A var() inside makes an unsupported color-mix fail at computed time, past the fallback above. */
+    @supports (color: color-mix(in srgb, red, blue)) {
+      .bar > div {
+        background: linear-gradient(90deg, color-mix(in srgb, var(--primary-color, #03a9f4) 55%, white), var(--primary-color, #03a9f4));
+      }
     }
     .bar > div::after {
       content: "";
@@ -1043,6 +1085,8 @@ export class RoomTwinCard extends LitElement {
       }
       .canvas,
       .face,
+      .hint,
+      .bar > div,
       .tools button {
         transition: none;
       }

@@ -1,5 +1,6 @@
 import { html, nothing, render, svg } from "lit";
 import { domainOf, type HassEntity, type HomeAssistant } from "../src/hass";
+import { activeColor, pinState } from "../src/pins";
 import { SimHome, formatState, type StateOverrides } from "./home";
 import { defaultIcon } from "./icons";
 
@@ -11,6 +12,15 @@ interface Binding {
 interface DemoFile {
   config: { lights?: Binding[]; pins?: Binding[] } & Record<string, unknown>;
   states: StateOverrides;
+}
+
+interface ActionConfig {
+  action: string;
+  entity?: string;
+  perform_action?: string;
+  service?: string;
+  data?: Record<string, unknown>;
+  target?: Record<string, unknown>;
 }
 
 interface RoomTwinCardElement extends HTMLElement {
@@ -106,11 +116,10 @@ function controls(home: SimHome, stateObj: HassEntity, detailed: boolean) {
         : nothing}`;
   }
   if (domain === "cover") {
-    if (stateObj.state === "opening" || stateObj.state === "closing") {
-      return html`<button @click=${() => call("cover", "stop_cover")}>Stop</button>`;
-    }
-    const open = stateObj.state === "open";
-    return html`<button @click=${() => call("cover", open ? "close_cover" : "open_cover")}>${open ? "Close" : "Open"}</button>`;
+    // One button that changes its label, so keyboard focus stays on it while the cover moves.
+    const moving = stateObj.state === "opening" || stateObj.state === "closing";
+    const [service, label] = moving ? ["stop_cover", "Stop"] : stateObj.state === "open" ? ["close_cover", "Close"] : ["open_cover", "Open"];
+    return html`<button @click=${() => call("cover", service)}>${label}</button>`;
   }
   if (domain === "lock") {
     const locked = stateObj.state === "locked";
@@ -126,10 +135,20 @@ function controls(home: SimHome, stateObj: HassEntity, detailed: boolean) {
   return nothing;
 }
 
-const ACTIVE = new Set(["on", "open", "opening", "closing", "unlocked", "playing"]);
-
+/** The entity's icon, coloured the way the card colours its pin. */
 function badge(stateObj: HassEntity, icon: string) {
-  return html`<span class="icon ${ACTIVE.has(stateObj.state) ? "active" : ""}">${iconSvg(icon)}</span>`;
+  const state = pinState(stateObj);
+  return html`<span class="icon ${state}" style=${state === "active" ? `--c: ${activeColor(stateObj)}` : ""}>${iconSvg(icon)}</span>`;
+}
+
+/** What Home Assistant's toggle action calls for an entity. */
+function toggleService(stateObj: HassEntity): [string, string] {
+  const domain = domainOf(stateObj.entity_id);
+  if (domain === "lock") return [domain, stateObj.state === "locked" ? "unlock" : "lock"];
+  if (domain === "cover") return [domain, stateObj.state === "closed" ? "open_cover" : "close_cover"];
+  if (domain === "scene" || domain === "script") return [domain, "turn_on"];
+  if (domain === "button" || domain === "input_button") return [domain, "press"];
+  return [domain, "toggle"];
 }
 
 function row(home: SimHome, stateObj: HassEntity, icon: string) {
@@ -146,7 +165,11 @@ function toast(message: string): void {
   el.textContent = message;
   el.classList.add("shown");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove("shown"), 4000);
+  toastTimer = setTimeout(() => {
+    el.classList.remove("shown");
+    // Emptied once it has slid away, so screen readers don't find a stale message later.
+    toastTimer = setTimeout(() => (el.textContent = ""), 300);
+  }, 4000);
 }
 
 async function main(): Promise<void> {
@@ -212,10 +235,17 @@ function start({ config, states }: DemoFile, slot: HTMLElement): void {
   // A pin's tap_action or hold_action. Home Assistant runs every kind; the demo only has the ones that stay on this page.
   card.addEventListener("hass-action", (e) => {
     const { config: pin, action } = (e as CustomEvent<{ config: Record<string, unknown> & { entity: string }; action: string }>).detail;
-    const { action: kind, entity = pin.entity } = pin[`${action}_action`] as { action: string; entity?: string };
+    const { action: kind, entity = pin.entity, ...rest } = pin[`${action}_action`] as ActionConfig;
+    const perform = rest.perform_action ?? rest.service;
+    const call = (domain: string, service: string, data: Record<string, unknown>) =>
+      home.callService(domain, service, data).catch((err: Error) => toast(err.message));
     if (kind === "more-info") openMoreInfo(entity);
-    else if (kind === "toggle") home.callService(domainOf(entity), "toggle", { entity_id: entity }).catch((err: Error) => toast(err.message));
-    else if (kind !== "none") toast(`${kind} works in Home Assistant, not in this demo`);
+    else if (kind === "toggle" && home.states[entity]) call(...toggleService(home.states[entity]), { entity_id: entity });
+    else if (kind === "toggle") toast(`${entity} is not in this demo home`);
+    else if ((kind === "perform-action" || kind === "call-service") && perform?.includes(".")) {
+      const [domain, service] = perform.split(".");
+      call(domain, service, { ...rest.data, ...rest.target });
+    } else if (kind !== "none") toast(`${kind} works in Home Assistant, not in this demo`);
   });
   card.addEventListener("hass-notification", (e) => toast((e as CustomEvent<{ message: string }>).detail.message));
   dialog.addEventListener("close", () => (moreInfo = ""));

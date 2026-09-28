@@ -11,7 +11,7 @@ The scan becomes public the moment you push it, and anyone can download the file
 
 ## Simulated devices
 
-Every entity in the config gets a believable state from its id: `light.*`, `switch.*`, `fan.*` and `input_boolean.*` toggle, covers open and close, locks lock, scenes and scripts run, buttons press. Sensors are guessed from words in the id (`temperature` or `temp`, `humidity`, `power`, `energy`, `illuminance` or `lux`, `battery`, `co2`) and drift a little every few seconds. Binary sensors named with `door`, `window`, `garage`, `gate`, `motion`, `occupancy`, `moisture` or `smoke` get that device class, so a door pin turns red when it's opened from the side panel.
+Every entity in the config gets a believable state from its id: `light.*`, `switch.*`, `fan.*` and `input_boolean.*` toggle, covers open and close, locks lock, scenes and scripts run, buttons press. Sensors are guessed from words in the id (`temperature` or `temp`, `humidity`, `power`, `energy`, `illuminance` or `lux`, `battery`, `co2`). Temperature, humidity, power, light level and CO2 drift a little every few seconds; energy and battery hold still. Binary sensors named with `door`, `window`, `garage`, `gate`, `motion`, `occupancy`, `moisture` or `smoke` get that device class, so a door pin turns red when it's opened from the side panel.
 
 To change a name or a starting state, add `demo/states.yaml`:
 
@@ -32,12 +32,12 @@ npm ci
 npm run demo -- --serve
 ```
 
-That builds the card and the page into `site/` and serves it at http://localhost:4173. `--port 8080` picks another port, and `--config`, `--splat` and `--states` point at files somewhere else.
+That builds the card and the page into `site/` and serves it at http://localhost:4173. `--port 8080` picks another port, `--config`, `--splat` and `--states` point at files somewhere else, and `--out` builds into another folder inside the repo.
 
 ## Publish on GitHub Pages
 
 1. In the repo's **Settings > Pages**, set **Source** to **GitHub Actions**.
-2. Commit `demo/room.spz` and `demo/room.yaml` (and `demo/states.yaml` if you made one) and push to `main`.
+2. Commit `demo/room.spz` and `demo/room.yaml` (and `demo/states.yaml` if you made one) and push to `main`. A scan kept in Git LFS works too, the workflow fetches LFS files.
 3. The **Demo** workflow builds the page and deploys it to `https://<your user>.github.io/roomtwin/`. It runs again whenever the card or the demo changes, and it skips itself while `demo/room.yaml` is missing. Forks build the page but don't deploy it.
 
 Then add the link near the top of the main README, for example `**[Try the live demo](https://<your user>.github.io/roomtwin/)**`.

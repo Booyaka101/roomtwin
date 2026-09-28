@@ -45,7 +45,7 @@ Copy the file to `/config/www/roomtwin/`, for example with the File editor or Sa
 
 If `www` didn't exist before, restart Home Assistant once so it starts serving the folder.
 
-Files under `/local/` are served without a login. Anyone who can reach your Home Assistant and guesses the file name can download the scan of your room. If your instance is reachable from the internet and you'd rather keep the scan private, keep it off a public instance or use a file name nobody will guess.
+Files under `/local/` are served without a login. Anyone who can reach your Home Assistant and guesses the file name can download the scan of your room. If your instance is reachable from the internet and you'd rather keep the scan private, use a file name nobody will guess.
 
 ## 3. Install the card
 
@@ -75,13 +75,14 @@ type: custom:roomtwin-card
 splat: /local/roomtwin/living.spz
 ```
 
-Drag to orbit, right-drag or two-finger drag to pan, scroll or pinch to zoom. The house button resets the view.
+Drag to orbit, right-drag or two-finger drag to pan, Ctrl+scroll or pinch to zoom. The house button resets the view.
 
 Admins see a pencil button in the corner. It opens edit mode, which works on the live room:
 
 1. **Set floor (tap 3 points)**: tap three spots spread across the floor. The room turns upright with the floor at height 0. It refuses three points in a line.
 2. **Tap the room** where a lamp or device is. Type or pick an entity, then choose **Add as light** (lights and switches) or **Add as pin** (anything).
-3. For a light, set **Radius (m)**, **Soft edge (m)** and **Brightness when off** with the sliders while you watch the room. Flip the real light to check it. **Label** and **Icon** override the entity's name and icon on the pin, for lights and pins alike.
+3. For a light, set **Radius (m)**, **Soft edge (m)** and **Brightness when off** with the sliders while you watch the room. Flip the real light to check it. **Label** and **Icon** override the entity's name and icon on the pin, for lights and pins alike. New lights start with a radius and soft edge sized to the room.
+   To change one later, tap its pin in the room or its chip under **In this room**. While it's selected, tapping the room moves it there, **Remove** deletes it and **Done** lets go of it.
 4. Optionally turn on **Ceiling cut** so you can see into the room from above, and press **Use this view as default** once the camera is where you like it.
 5. Press **Save**. The card writes its new config into the dashboard, leaving everything else on it as it was, and Home Assistant redraws the dashboard with it.
 
@@ -98,12 +99,13 @@ The card's visual editor in the dashboard dialog covers the plain options: the s
 - Garage doors, gates and doors (covers with those device classes) open more-info on tap instead of moving, so brushing the pin can't open the garage.
 - **Long-press** any pin to open the more-info dialog. Tapping a sensor, an unavailable entity or anything else without a tap action opens more-info too.
 - A pin or light with its own `tap_action`, `hold_action` or `double_tap_action` does that instead, using the same actions as Home Assistant's own cards: `more-info`, `toggle`, `navigate`, `url`, `perform-action`, `assist` or `none`, with `confirmation` if you want a prompt first. That also overrides the garage door rule above, so a `toggle` tap action on a garage door does move it. Once a pin has a double tap action, a single tap on it waits a quarter of a second to rule out a second one.
-- From the keyboard, Tab to a pin, then Enter or Space taps it, and Shift+Enter or the menu key opens more-info. Screen readers hear the pin's name and state.
+- From the keyboard, Tab to a pin, then Enter or Space taps it, and Shift+Enter or the menu key does what a long-press does. Screen readers hear the pin's name and state. Tab to the room itself and the arrow keys move around it; Home goes back to the saved view.
 - Sensor pins show the current state with its unit and update live.
 - A pin that is on, open, playing, unlocked, set to heat and so on takes your theme's colour for that state, the way Home Assistant's tiles do, and a coloured light's pin shows the light's colour.
 - A pin turns red while it has something to look at: a binary sensor for an open door, window or garage door, or smoke, gas, carbon monoxide, a leak, a safety problem or tampering, and also a jammed lock, a triggered alarm or a vacuum reporting an error.
 - A pin whose entity doesn't exist shows as a grey question mark, so a renamed entity is easy to spot.
-- Drag to look around and right-drag to pan. Scrolling over the card scrolls the dashboard as usual, so zoom by holding Ctrl while you scroll, or pinch. In edit mode the scroll wheel zooms on its own.
+- Where pins crowd together on screen, the one further back hides its label until you hover it, tab to it or select it in edit mode. Its icon stays where the device is.
+- Drag to look around and right-drag to pan. Scrolling over the card scrolls the dashboard as usual, so zoom by holding Ctrl (Cmd on a Mac) while you scroll, or pinch. In edit mode the scroll wheel zooms on its own.
 - On a touch screen, swipe sideways to turn the view and pinch to zoom. An up or down swipe scrolls the dashboard.
 - A card doesn't download its room until it first scrolls into view, and cards that are off-screen or on a hidden tab stop rendering entirely.
 
@@ -167,7 +169,7 @@ A theme can set these, or card-mod on a single card:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `--roomtwin-pin-size` | `36px`, `32px` on cards narrower than 520px | Height of a pin. The icon scales with it. |
+| `--roomtwin-pin-size` | `36px`, `32px` on cards 520px wide or less | Height of a pin. The icon scales with it. |
 | `--roomtwin-pin-background` | `rgba(18, 20, 26, 0.75)` | Background of the pin, around its icon. |
 | `--roomtwin-pin-text-color` | `#fff` | Label colour, and the icon colour on pins that are off or idle. |
 | `--roomtwin-stage-background` | `radial-gradient(120% 100% at 50% 30%, #262a31, #111 70%)` | What shows behind the room while it loads and around its edges. |
@@ -187,7 +189,7 @@ With the system's reduce motion setting on, the card skips the camera moves and 
 Each light multiplies the colour of the splats inside its soft sphere:
 
 - off, unavailable or missing: `off_dim` on every channel.
-- on: `f = off_dim + (1 - off_dim) × brightness / 255`. A light in a colour mode (`hs`, `xy`, `rgb`, `rgbw`, `rgbww`) is tinted by its `rgb_color`, scaled so the brightest channel is 1. Otherwise the tint is white, including white bulbs in `color_temp` mode, since the capture already shows their warmth.
+- on: `f = off_dim + (1 - off_dim) × brightness / 255`. A light in a colour mode (`hs`, `xy`, `rgb`, `rgbw`, `rgbww`) is tinted three quarters of the way towards its `rgb_color`, scaled so the brightest channel is 1, so a red bulb still leaves a quarter of the green and blue. Otherwise the tint is white, including white bulbs in `color_temp` mode, since the capture already shows their warmth.
 
 So at the default `off_dim` of 0.45 a light at full brightness leaves its region exactly as captured, and switching it off darkens it to 45%. Capture the room with the lights on for the best result.
 
@@ -199,6 +201,7 @@ The card explains every failure it knows about:
 
 - **Could not load /local/roomtwin/x.spz (HTTP 404).** The file isn't where the URL says. The message tells you the `/config/www/` path it expected.
 - **Could not reach ...** Home Assistant didn't answer. Check the connection and press **Try again**.
+- **Could not read ... as a splat file.** The file downloaded but isn't a scan Spark can read: cut short, saved in another format under this extension, or an HTML error page saved with a `.spz` name.
 - **... is a 329 MB .ply.** It still loads, but convert it to `.spz` for tablets.
 - **RoomTwin needs WebGL2 ...** The browser or device has no WebGL2, or hardware acceleration is off.
 - **The browser dropped the 3D view to free graphics memory.** Common on phones with many tabs open. The card reloads the room by itself the first time; if it happens again within a minute it shows this message and waits for **Try again**.
@@ -229,7 +232,7 @@ The card uses Lit, three.js and [Spark](https://sparkjs.dev) 2.2.0, bundled by R
 
 `npm run demo -- --serve` builds the live demo, the card on a real room with a simulated home around it, and serves it at http://localhost:4173. It needs a scan and the card's YAML in `demo/`; [demo/README.md](demo/README.md) covers that and publishing it on GitHub Pages.
 
-To release, bump `version` in `package.json` and `src/version.ts` (a test keeps them equal), add a `## <version>` section to `CHANGELOG.md`, commit, and push a tag `v<version>`. The release workflow tests and builds the card, creates the GitHub release with those notes and `roomtwin-card.js` attached, then runs the HACS check. HACS installs from the release asset. The HACS check fails unless the README shows at least one image (a screenshot or GIF of the card, not just badges), so add one before the first tag.
+To release, bump `version` in `package.json` and `src/version.ts` (a test keeps them equal), add a `## <version>` section to `CHANGELOG.md`, commit, and push a tag `v<version>`. The release workflow checks the tag matches `package.json`, typechecks, tests and builds the card, creates the GitHub release with those notes and `roomtwin-card.js` attached, then runs the HACS check. HACS installs from the release asset. The HACS check fails unless the README shows at least one image (a screenshot or GIF of the card, not just badges), so add one before the first tag.
 
 ## License
 

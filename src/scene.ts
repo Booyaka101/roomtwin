@@ -29,8 +29,8 @@ export class Flight {
   constructor(
     fromPosition: THREE.Vector3,
     private readonly fromTarget: THREE.Vector3,
-    toPosition: THREE.Vector3,
-    private readonly toTarget: THREE.Vector3,
+    readonly toPosition: THREE.Vector3,
+    readonly toTarget: THREE.Vector3,
     readonly ms: number,
     private readonly ease: (t: number) => number,
   ) {
@@ -159,6 +159,7 @@ export class RoomScene {
   private disposed = false;
   private flight: Flight | null = null;
   private flightStart = 0;
+  private marked: { flight: Flight; start: number } | null = null;
 
   constructor(container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: false });
@@ -188,9 +189,13 @@ export class RoomScene {
     this.controls.rotateSpeed = 0.4;
     this.controls.addEventListener("change", () => this.requestRender());
     this.controls.addEventListener("start", () => (this.flight = null));
+    // OrbitControls fires no "start" for the keyboard. Added first so the pan applies from where the flight left off.
+    canvas.addEventListener("keydown", (e) => {
+      if (e.key.startsWith("Arrow")) this.flight = null;
+    });
     // Arrow keys pan, so pins outside the saved view can be reached without a pointer.
     canvas.tabIndex = 0;
-    canvas.setAttribute("aria-label", "Room view. Drag to turn, arrow keys to move around.");
+    canvas.setAttribute("aria-label", "Room view. Drag to turn, arrow keys to move around, Home to go back to the saved view.");
     this.controls.listenToKeyEvents(canvas);
   }
 
@@ -347,9 +352,10 @@ export class RoomScene {
       this.camera.position.copy(center).add(new THREE.Vector3(0, size.y * 0.1, size.z * 0.4));
     }
     this.flight = null;
-    if (motion !== "jump" && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      const toPosition = this.camera.position.clone();
-      const toTarget = this.controls.target.clone();
+    const toPosition = this.camera.position.clone();
+    const toTarget = this.controls.target.clone();
+    const moved = fromPosition.distanceTo(toPosition) + fromTarget.distanceTo(toTarget) > extent / 1000;
+    if ((motion === "enter" || (motion === "glide" && moved)) && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
       if (motion === "enter") {
         const start = new THREE.Spherical().setFromVector3(toPosition.clone().sub(toTarget));
         // Far enough to read as arriving, not so far that the camera backs out through the wall behind it.
@@ -368,9 +374,14 @@ export class RoomScene {
     this.requestRender();
   }
 
-  /** Remembers the camera so undoDrag() can put it back. */
+  get flying(): boolean {
+    return !!this.flight;
+  }
+
+  /** Remembers the camera, and any move it is part way through, so undoDrag() can put it back. */
   markView(): void {
     this.controls.saveState();
+    this.marked = this.flight && { flight: this.flight, start: this.flightStart };
   }
 
   /** Puts the camera back where markView() left it, dropping the motion damping would still carry on. */
@@ -379,15 +390,21 @@ export class RoomScene {
     this.controls.update();
     this.controls.enableDamping = true;
     this.controls.reset();
+    // A swipe the page took for a scroll shouldn't strand the camera part way into the room.
+    if (this.marked) {
+      this.flight = this.marked.flight;
+      this.flightStart = this.marked.start;
+      this.requestRender();
+    }
   }
 
-  /** Current camera in capture coordinates, so it survives a later change of up axis. */
+  /** Current camera in capture coordinates, so it survives a later change of up axis. Mid-move, where the move ends. */
   currentView(): CameraView {
     const toCapture = this.root.matrixWorld.clone().invert();
     const round = (v: THREE.Vector3): Vec3 => v.toArray().map((n) => Math.round(n * 1000) / 1000) as Vec3;
     return {
-      position: round(this.camera.position.clone().applyMatrix4(toCapture)),
-      target: round(this.controls.target.clone().applyMatrix4(toCapture)),
+      position: round((this.flight?.toPosition ?? this.camera.position).clone().applyMatrix4(toCapture)),
+      target: round((this.flight?.toTarget ?? this.controls.target).clone().applyMatrix4(toCapture)),
     };
   }
 

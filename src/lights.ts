@@ -30,12 +30,18 @@ export function lightColor(state: HassEntity | undefined, offDim: number): Rgb {
   const raw = state.attributes.brightness;
   const brightness = typeof raw === "number" && Number.isFinite(raw) ? Math.min(Math.max(raw, 0), 255) : 255;
   const f = offDim + (1 - offDim) * (brightness / 255);
-  const rgb = state.attributes.rgb_color;
-  const mode = state.attributes.color_mode;
-  if (!validRgb(rgb) || (typeof mode === "string" && !COLOR_MODES.has(mode))) return [f, f, f];
+  const rgb = colorOf(state);
+  if (!rgb) return [f, f, f];
   const max = Math.max(...rgb);
   const tint = (c: number) => f * (1 - TINT * (1 - c / max));
   return [tint(rgb[0]), tint(rgb[1]), tint(rgb[2])];
+}
+
+/** The colour a light is set to, or undefined for a white bulb or one that doesn't report a colour. */
+export function colorOf(state: HassEntity): Rgb | undefined {
+  const rgb = state.attributes.rgb_color;
+  const mode = state.attributes.color_mode;
+  return validRgb(rgb) && !(typeof mode === "string" && !COLOR_MODES.has(mode)) ? rgb : undefined;
 }
 
 interface LightEdit {

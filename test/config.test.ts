@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { ConfigError, aspectRatio, parseConfig, splatExtension } from "../src/config";
+import { ConfigError, aspectRatio, bindingRefs, parseConfig, splatExtension } from "../src/config";
 
 const base = { type: "custom:roomtwin-card", splat: "/local/roomtwin/living.spz" };
 
@@ -121,6 +121,11 @@ describe("parseConfig", () => {
     expect([more.up, more.lod, more.camera, more.aspect_ratio]).toEqual([[0, -1, 0], true, undefined, undefined]);
   });
 
+  test("an empty name counts as no name", () => {
+    const config = parseConfig({ ...base, pins: [{ entity: "sensor.t", anchor: [0, 0, 1], name: "" }] });
+    expect(config.pins[0]).toEqual({ entity: "sensor.t", anchor: [0, 0, 1] });
+  });
+
   test("lights and pins take a name and an icon", () => {
     const config = parseConfig({
       ...base,
@@ -131,11 +136,14 @@ describe("parseConfig", () => {
     expect(config.pins[0]).toEqual({ entity: "sensor.t", anchor: [0, 0, 1], name: "21", icon: "local:ceiling_fan" });
   });
 
-  test("lights and pins take Home Assistant tap and hold actions", () => {
+  test("lights and pins take Home Assistant tap, hold and double tap actions", () => {
     const tap = { action: "navigate", navigation_path: "/lovelace/garage" };
     const hold = { action: "perform-action", perform_action: "cover.open_cover", confirmation: { text: "Open?" } };
-    const config = parseConfig({ ...base, pins: [{ entity: "cover.garage", anchor: [0, 0, 0], tap_action: tap, hold_action: hold }] });
-    expect(config.pins[0]).toMatchObject({ tap_action: tap, hold_action: hold });
+    const double = { action: "more-info" };
+    const pin = { entity: "cover.garage", anchor: [0, 0, 0], tap_action: tap, hold_action: hold, double_tap_action: double };
+    const config = parseConfig({ ...base, pins: [pin] });
+    expect(config.pins[0]).toMatchObject({ tap_action: tap, hold_action: hold, double_tap_action: double });
+    expect(bindingRefs(config)[0]).toMatchObject({ double_tap_action: double });
     expect(error({ ...base, pins: [{ entity: "cover.garage", anchor: [0, 0, 0], tap_action: "toggle" }] })).toBe(
       'pins[0].tap_action must be a card action like { action: more-info }, got "toggle"',
     );

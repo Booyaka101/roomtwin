@@ -10,6 +10,7 @@ export interface PinBinding {
   icon?: string;
   tap_action?: ActionConfig;
   hold_action?: ActionConfig;
+  double_tap_action?: ActionConfig;
 }
 
 export interface LightBinding extends PinBinding {
@@ -59,7 +60,7 @@ const TOP_KEYS = [
   "type", "splat", "up", "floor", "ceiling_cut", "aspect_ratio", "lod", "lod_scale", "camera", "lights", "pins",
   ...PASSTHROUGH,
 ];
-const PIN_KEYS = ["entity", "anchor", "name", "icon", "tap_action", "hold_action"];
+const PIN_KEYS = ["entity", "anchor", "name", "icon", "tap_action", "hold_action", "double_tap_action"];
 const LIGHT_KEYS = [...PIN_KEYS, "radius", "soft_edge", "off_dim"];
 
 export interface BindingRef extends PinBinding {
@@ -71,8 +72,8 @@ export interface BindingRef extends PinBinding {
 export function bindingRefs(config: RoomTwinConfig): BindingRef[] {
   const ref =
     (kind: "light" | "pin") =>
-    ({ entity, anchor, name, icon, tap_action, hold_action }: PinBinding, index: number): BindingRef => ({
-      kind, index, entity, anchor, name, icon, tap_action, hold_action,
+    ({ entity, anchor, name, icon, tap_action, hold_action, double_tap_action }: PinBinding, index: number): BindingRef => ({
+      kind, index, entity, anchor, name, icon, tap_action, hold_action, double_tap_action,
     });
   return [...config.lights.map(ref("light")), ...config.pins.map(ref("pin"))];
 }
@@ -166,7 +167,7 @@ export function aspectRatio(value: unknown): number {
 /** The name, icon and action overrides both kinds of binding share. */
 function overrides(value: Record<string, unknown>, path: string): Omit<PinBinding, "entity" | "anchor"> {
   const result: Omit<PinBinding, "entity" | "anchor"> = {};
-  if (!unset(value.name)) {
+  if (!unset(value.name) && value.name !== "") {
     // An unquoted number in YAML, like a room number, is still meant as text.
     if (typeof value.name !== "string" && typeof value.name !== "number") {
       throw new ConfigError(`${path}.name must be text, got ${describe(value.name)}`);
@@ -179,7 +180,7 @@ function overrides(value: Record<string, unknown>, path: string): Omit<PinBindin
     }
     result.icon = value.icon;
   }
-  for (const key of ["tap_action", "hold_action"] as const) {
+  for (const key of ["tap_action", "hold_action", "double_tap_action"] as const) {
     const action = value[key];
     if (unset(action)) continue;
     if (!isObject(action) || typeof action.action !== "string") {

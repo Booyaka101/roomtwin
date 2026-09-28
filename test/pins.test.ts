@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as THREE from "three";
-import { HOLD_MS, PressGesture, pinLabel, pinState, projectToScreen, spokenState, tapService } from "../src/pins";
+import { DOUBLE_TAP_MS, HOLD_MS, PressGesture, activeColor, pinLabel, pinState, projectToScreen, spokenState, tapService } from "../src/pins";
 import type { HomeAssistant } from "../src/hass";
 import { entity } from "./helpers";
 
@@ -62,6 +62,30 @@ test("pinState", () => {
   expect(pinState(entity("binary_sensor.balcony", "off", { device_class: "door" }))).toBe("idle");
   expect(pinState(entity("binary_sensor.hall", "on", { device_class: "motion" }))).toBe("active");
   expect(pinState(entity("binary_sensor.plain", "on"))).toBe("active");
+  expect(pinState(entity("lock.front", "unlocked"))).toBe("active");
+  expect(pinState(entity("lock.front", "locked"))).toBe("idle");
+  expect(pinState(entity("lock.front", "jammed"))).toBe("alert");
+  expect(pinState(entity("alarm_control_panel.home", "triggered"))).toBe("alert");
+  expect(pinState(entity("vacuum.robot", "error"))).toBe("alert");
+  expect(pinState(entity("vacuum.robot", "cleaning"))).toBe("active");
+});
+
+describe("activeColor", () => {
+  test("follows the theme's state colours, most specific first", () => {
+    expect(activeColor(entity("cover.blind", "open", { device_class: "blind" }))).toBe(
+      "var(--state-cover-blind-open-color, var(--state-cover-open-color, var(--state-cover-active-color, var(--state-active-color, #ffb300))))",
+    );
+    expect(activeColor(entity("climate.hall", "heat_cool"))).toBe(
+      "var(--state-climate-heat_cool-color, var(--state-climate-active-color, var(--state-active-color, #ffb300)))",
+    );
+  });
+
+  test("a coloured light shows its colour, a white one the theme's", () => {
+    expect(activeColor(entity("light.strip", "on", { color_mode: "hs", rgb_color: [0, 0, 255] }))).toBe(
+      "color-mix(in srgb, rgb(0, 0, 255) 60%, white)",
+    );
+    expect(activeColor(entity("light.lamp", "on", { color_mode: "color_temp", rgb_color: [255, 180, 100] }))).toContain("--state-light-on-color");
+  });
 });
 
 describe("projectToScreen", () => {
@@ -75,6 +99,7 @@ describe("projectToScreen", () => {
     expect(p.x).toBeCloseTo(400);
     expect(p.y).toBeCloseTo(200);
     expect(p.visible).toBe(true);
+    expect(p.depth).toBeCloseTo(5);
   });
 
   test("up in the world is up on screen", () => {
@@ -93,15 +118,21 @@ describe("PressGesture", () => {
 
   const event = (x = 0, y = 0) => ({ button: 0, clientX: x, clientY: y, stopPropagation() {} }) as PointerEvent;
 
-  function setup() {
+  function setup(doubleTaps = false) {
     const onTap = vi.fn();
     const onHold = vi.fn();
-    return { onTap, onHold, gesture: new PressGesture(onTap, onHold) };
+    const onDoubleTap = vi.fn();
+    const gesture = new PressGesture<number>({ tap: onTap, hold: onHold, hasDoubleTap: () => doubleTaps, doubleTap: onDoubleTap });
+    const press = (key = 0) => {
+      gesture.down(event(), key);
+      gesture.up(event());
+    };
+    return { onTap, onHold, onDoubleTap, gesture, press };
   }
 
   test("a quick press is a tap", () => {
     const { onTap, onHold, gesture } = setup();
-    gesture.down(event());
+    gesture.down(event(), 0);
     vi.advanceTimersByTime(100);
     gesture.up(event());
     expect(onTap).toHaveBeenCalledOnce();
@@ -110,7 +141,7 @@ describe("PressGesture", () => {
 
   test("holding opens more-info without also tapping", () => {
     const { onTap, onHold, gesture } = setup();
-    gesture.down(event());
+    gesture.down(event(), 0);
     vi.advanceTimersByTime(HOLD_MS);
     expect(onHold).toHaveBeenCalledOnce();
     gesture.up(event());
@@ -119,7 +150,7 @@ describe("PressGesture", () => {
 
   test("dragging off a pin does nothing", () => {
     const { onTap, onHold, gesture } = setup();
-    gesture.down(event(0, 0));
+    gesture.down(event(0, 0), 0);
     gesture.move(event(30, 0));
     vi.advanceTimersByTime(HOLD_MS);
     gesture.up(event(30, 0));
@@ -129,9 +160,62 @@ describe("PressGesture", () => {
 
   test("a small wobble is still a tap", () => {
     const { onTap, gesture } = setup();
-    gesture.down(event(0, 0));
+    gesture.down(event(0, 0), 0);
     gesture.move(event(4, 3));
     gesture.up(event(4, 3));
     expect(onTap).toHaveBeenCalledOnce();
+  });
+
+  test("without a double tap action a tap fires straight away", () => {
+    const { onTap, press } = setup();
+    press(3);
+    expect(onTap).toHaveBeenCalledWith(3);
+  });
+
+  test("two quick taps are a double tap and not a tap", () => {
+    const { onTap, onDoubleTap, press } = setup(true);
+    press();
+    expect(onTap).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(DOUBLE_TAP_MS - 50);
+    press();
+    vi.advanceTimersByTime(DOUBLE_TAP_MS * 2);
+    expect(onDoubleTap).toHaveBeenCalledOnce();
+    expect(onTap).not.toHaveBeenCalled();
+  });
+
+  test("a single tap fires once the double tap window has passed", () => {
+    const { onTap, onDoubleTap, press } = setup(true);
+    press(2);
+    vi.advanceTimersByTime(DOUBLE_TAP_MS);
+    expect(onTap).toHaveBeenCalledWith(2);
+    expect(onDoubleTap).not.toHaveBeenCalled();
+  });
+
+  test("a tap on another pin inside the window is two taps", () => {
+    const { onTap, onDoubleTap, press } = setup(true);
+    press(0);
+    press(1);
+    expect(onTap).toHaveBeenCalledWith(0);
+    vi.advanceTimersByTime(DOUBLE_TAP_MS);
+    expect(onTap).toHaveBeenLastCalledWith(1);
+    expect(onDoubleTap).not.toHaveBeenCalled();
+  });
+
+  test("a waiting tap is dropped when its pin goes away", () => {
+    const { onTap, gesture, press } = setup(true);
+    press();
+    gesture.forget();
+    vi.advanceTimersByTime(DOUBLE_TAP_MS);
+    expect(onTap).not.toHaveBeenCalled();
+  });
+
+  test("tap then hold is a tap and a hold", () => {
+    const { onTap, onHold, onDoubleTap, gesture, press } = setup(true);
+    press();
+    gesture.down(event(), 0);
+    vi.advanceTimersByTime(HOLD_MS);
+    expect(onTap).toHaveBeenCalledOnce();
+    expect(onHold).toHaveBeenCalledOnce();
+    expect(onDoubleTap).not.toHaveBeenCalled();
   });
 });

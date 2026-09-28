@@ -97,10 +97,11 @@ The card's visual editor in the dashboard dialog covers the plain options: the s
 - Tapping a scene or script runs it, and tapping a button or input_button presses it.
 - Garage doors, gates and doors (covers with those device classes) open more-info on tap instead of moving, so brushing the pin can't open the garage.
 - **Long-press** any pin to open the more-info dialog. Tapping a sensor, an unavailable entity or anything else without a tap action opens more-info too.
-- A pin or light with its own `tap_action` or `hold_action` does that instead, using the same actions as Home Assistant's own cards: `more-info`, `toggle`, `navigate`, `url`, `perform-action`, `assist` or `none`, with `confirmation` if you want a prompt first. That also overrides the garage door rule above, so a `toggle` tap action on a garage door does move it.
+- A pin or light with its own `tap_action`, `hold_action` or `double_tap_action` does that instead, using the same actions as Home Assistant's own cards: `more-info`, `toggle`, `navigate`, `url`, `perform-action`, `assist` or `none`, with `confirmation` if you want a prompt first. That also overrides the garage door rule above, so a `toggle` tap action on a garage door does move it. Once a pin has a double tap action, a single tap on it waits a quarter of a second to rule out a second one.
 - From the keyboard, Tab to a pin, then Enter or Space taps it, and Shift+Enter or the menu key opens more-info. Screen readers hear the pin's name and state.
 - Sensor pins show the current state with its unit and update live.
-- A binary sensor pin turns red while it has something to look at: an open door, window or garage door, or smoke, gas, carbon monoxide, a leak, a safety problem or tampering.
+- A pin that is on, open, playing, unlocked, set to heat and so on takes your theme's colour for that state, the way Home Assistant's tiles do, and a coloured light's pin shows the light's colour.
+- A pin turns red while it has something to look at: a binary sensor for an open door, window or garage door, or smoke, gas, carbon monoxide, a leak, a safety problem or tampering, and also a jammed lock, a triggered alarm or a vacuum reporting an error.
 - A pin whose entity doesn't exist shows as a grey question mark, so a renamed entity is easy to spot.
 - Drag to look around and right-drag to pan. Scrolling over the card scrolls the dashboard as usual, so zoom by holding Ctrl while you scroll, or pinch. In edit mode the scroll wheel zooms on its own.
 - On a touch screen, swipe sideways to turn the view and pinch to zoom. An up or down swipe scrolls the dashboard.
@@ -149,16 +150,35 @@ pins:
 | `lights[].off_dim` | `0.45` | How bright the region looks when the light is off, from 0 (black) to 1 (unchanged). |
 | `lights[].name` | entity name | Label shown on hover, read by screen readers and shown in the editor. |
 | `lights[].icon` | entity icon | Pin icon, like `mdi:lamp`. |
-| `lights[].tap_action`, `lights[].hold_action` | toggle, more-info | Any Home Assistant card action, as on the built-in cards. |
+| `lights[].tap_action`, `lights[].hold_action`, `lights[].double_tap_action` | toggle, more-info, nothing | Any Home Assistant card action, as on the built-in cards. |
 | `pins[].entity` | required | Any entity. |
 | `pins[].anchor` | required | Where the pin sits, in capture coordinates. |
 | `pins[].name` | entity name | Label shown on hover, read by screen readers and shown in the editor. |
 | `pins[].icon` | entity icon | Pin icon, like `mdi:thermometer`. |
-| `pins[].tap_action`, `pins[].hold_action` | depends on the entity, more-info | Any Home Assistant card action, as on the built-in cards. |
+| `pins[].tap_action`, `pins[].hold_action`, `pins[].double_tap_action` | depends on the entity, more-info, nothing | Any Home Assistant card action, as on the built-in cards. |
 
 The card rejects options it doesn't know, so a typo like `raduis` is an error instead of being silently ignored. Home Assistant shows a bare "Configuration error" on the dashboard; the message naming the option shows once you edit the dashboard or open the card's editor.
 
 Anchors and the camera are stored in the capture's own coordinates, so re-running the floor tool never moves your pins.
+
+### Styling
+
+A theme can set these, or card-mod on a single card:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `--roomtwin-pin-size` | `36px` | Height of a pin. The icon scales with it. |
+| `--roomtwin-pin-background` | `rgba(0, 0, 0, 0.55)` | Background of a pin that is off or idle. |
+| `--roomtwin-pin-text-color` | `#fff` | Icon and label colour on those pins. |
+| `--roomtwin-stage-background` | `#111` | What shows behind the room while it loads and around its edges. |
+
+Active pins use Home Assistant's own state colours, like `--state-cover-open-color` or `--state-active-color`, so a theme that sets those changes the pins too. In a theme file the names go without the leading dashes:
+
+```yaml
+my_theme:
+  roomtwin-pin-size: 44px
+  roomtwin-pin-background: "rgba(20, 20, 40, 0.7)"
+```
 
 ### How lights change the room
 
@@ -188,10 +208,11 @@ The card explains every failure it knows about:
 ## Known limits
 
 - A light region is a sphere, so it also brightens whatever else is inside it, like the wall behind the lamp. There is no relighting.
+- Where two light spheres overlap their factors multiply, so with both lamps off that spot drops to about 20% rather than 45%. Shrink `radius` or raise `soft_edge` if a corner goes too dark.
 - COLMAP captures have no real-world scale, so the "(m)" on the sliders only means metres for Scaniverse captures.
 - On a touch screen an up or down swipe scrolls the dashboard, so tilting the view up or down with a finger only works in edit mode. Save the tilt you like with **Use this view as default**.
-- While the dashboard's card editor is open, its preview holds a second copy of the room in memory, freed a minute after the dialog closes.
-- The preview in the "Add card" picker points at `/local/roomtwin/room.spz`, which won't exist, so it shows the message explaining where to put the file.
+- While the dashboard's card editor is open, its preview holds a second copy of the room in memory, freed a few seconds after the dialog closes.
+- A newly added card starts out pointing at `/local/roomtwin/room.spz`, which won't exist yet, so the editor's preview shows the message explaining where to put the file.
 
 ## Development
 
@@ -206,7 +227,7 @@ The card uses Lit, three.js and [Spark](https://sparkjs.dev) 2.2.0, bundled by R
 
 `npm run demo -- --serve` builds the live demo, the card on a real room with a simulated home around it, and serves it at http://localhost:4173. It needs a scan and the card's YAML in `demo/`; [demo/README.md](demo/README.md) covers that and publishing it on GitHub Pages.
 
-To release, bump `version` in `package.json` and `src/version.ts` (a test keeps them equal), add a `## <version>` section to `CHANGELOG.md`, commit, and push a tag `v<version>`. The release workflow tests and builds the card, creates the GitHub release with those notes and `roomtwin-card.js` attached, then runs the HACS check. HACS installs from the release asset.
+To release, bump `version` in `package.json` and `src/version.ts` (a test keeps them equal), add a `## <version>` section to `CHANGELOG.md`, commit, and push a tag `v<version>`. The release workflow tests and builds the card, creates the GitHub release with those notes and `roomtwin-card.js` attached, then runs the HACS check. HACS installs from the release asset. The HACS check fails unless the README shows at least one image (a screenshot or GIF of the card, not just badges), so add one before the first tag.
 
 ## License
 

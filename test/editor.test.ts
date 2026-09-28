@@ -118,6 +118,18 @@ describe("toYaml", () => {
     expect(yaml).toContain("radius: 0.3\n");
   });
 
+  test("actions and other cards' options keep their numbers exactly", () => {
+    const config = parseConfig({
+      ...full,
+      pins: [{ entity: "sensor.t", anchor: [0.1 + 0.2, 0, 0], tap_action: { action: "perform-action", perform_action: "light.turn_on", data: { brightness_pct: 0.123456789 } } }],
+      visibility: [{ condition: "numeric_state", entity: "sensor.t", above: 20.000012345 }],
+    });
+    const card = toCardConfig(config) as { pins: { anchor: number[]; tap_action: { data: { brightness_pct: number } } }[]; visibility: { above: number }[] };
+    expect(card.pins[0].anchor).toEqual([0.3, 0, 0]);
+    expect(card.pins[0].tap_action.data.brightness_pct).toBe(0.123456789);
+    expect(card.visibility[0].above).toBe(20.000012345);
+  });
+
   test("keys that YAML would misread are quoted, and empty mappings survive", () => {
     const config = parseConfig({
       ...full,

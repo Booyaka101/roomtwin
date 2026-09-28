@@ -1,11 +1,12 @@
 import { LitElement, css, html, nothing, type PropertyValues } from "lit";
+import { styleMap } from "lit/directives/style-map.js";
 import * as THREE from "three";
 import { aspectRatio, bindingRefs, parseConfig, type BindingRef, type RoomTwinConfig } from "./config";
 import { canSave, dashboardUrlPath, saveCard } from "./dashboard";
 import { toCardConfig, toYaml, type HelperDetail, type RoomTwinEditor } from "./editor";
 import type { HassEntity, HomeAssistant } from "./hass";
 import { LightRig } from "./lights";
-import { PressGesture, pinLabel, pinState, projectToScreen, spokenState, tapService } from "./pins";
+import { PressGesture, activeColor, pinLabel, pinState, projectToScreen, spokenState, tapService } from "./pins";
 import { RoomScene, SplatLoadError, webgl2Available } from "./scene";
 import { VERSION } from "./version";
 
@@ -68,15 +69,17 @@ export class RoomTwinCard extends LitElement {
   private resize?: ResizeObserver;
   private pinEls: HTMLElement[] = [];
   private pins: BindingRef[] = [];
-  private pressed = -1;
   private pinPointer?: PointerEvent;
   private lastAutoReload = 0;
   private tapStart?: { x: number; y: number; t: number };
   private readonly tmp = new THREE.Vector3();
-  private readonly press = new PressGesture(
-    () => this.pinTap(this.pins[this.pressed]),
-    () => this.pinHold(this.pins[this.pressed]),
-  );
+  // Keyed by the binding itself, so a tap still waiting out the double tap window can't land on another pin if the config changes.
+  private readonly press = new PressGesture<BindingRef>({
+    tap: (pin) => this.pinTap(pin),
+    hold: (pin) => this.pinHold(pin),
+    hasDoubleTap: (pin) => !this._editing && !!pin.double_tap_action,
+    doubleTap: (pin) => this.fire("hass-action", { config: pin, action: "double_tap" }),
+  });
 
   static getStubConfig(): Record<string, unknown> {
     return { splat: "/local/roomtwin/room.spz" };
@@ -121,6 +124,7 @@ export class RoomTwinCard extends LitElement {
     const old = this._config;
     this._config = parseConfig(raw);
     this.rawConfig = raw as Record<string, unknown>;
+    this.replaced = false;
     this._draft = null;
     this._editing = false;
     this.scene?.showHelper(null);
@@ -149,7 +153,8 @@ export class RoomTwinCard extends LitElement {
   }
 
   getCardSize(): number {
-    return 7;
+    // In units of 50px, for a masonry column about 500px wide.
+    return Math.max(3, Math.ceil(10 / aspectRatio(this._config?.aspect_ratio)));
   }
 
   getGridOptions() {
@@ -176,6 +181,7 @@ export class RoomTwinCard extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     clearTimeout(this.disposeTimer);
+    this.replaced = false;
     document.addEventListener("visibilitychange", this.onVisibility);
     for (const type of ["keydown", "keyup", "blur"]) window.addEventListener(type, this.onControlKey, true);
     if (this.hasUpdated) {
@@ -191,6 +197,7 @@ export class RoomTwinCard extends LitElement {
     this.intersection?.disconnect();
     this.resize?.disconnect();
     this.press.cancel();
+    this.press.forget();
     this.onScreen = false;
     this.updateActive();
     this.disposeTimer = setTimeout(() => this.teardown(), this.preview || this.replaced ? PREVIEW_DISPOSE_AFTER_MS : DISPOSE_AFTER_MS);
@@ -343,11 +350,13 @@ export class RoomTwinCard extends LitElement {
       const p = projectToScreen(scene.captureToWorld(pin.anchor, this.tmp), scene.camera, width, height);
       el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -50%)`;
       el.style.visibility = p.visible ? "" : "hidden";
+      // Nearer pins on top, to the centimetre.
+      el.style.zIndex = String(Math.max(0, Math.round(100_000 - p.depth * 100)));
     });
   };
 
-  private fire(type: string, detail: unknown): void {
-    this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
+  private fire(type: string, detail: unknown, from: EventTarget = this): void {
+    from.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
   }
 
   private moreInfo(entityId: string | undefined): void {
@@ -388,11 +397,11 @@ export class RoomTwinCard extends LitElement {
       this.handToControls(e);
       return;
     }
-    this.pressed = Number(el.dataset.i);
     // Keeps the release on the pin when the pointer slips off it, which would otherwise read as a long-press.
     el.setPointerCapture(e.pointerId);
     this.pinPointer = e;
-    this.press.down(e);
+    const pin = this.pins[Number(el.dataset.i)];
+    if (pin) this.press.down(e, pin);
   }
 
   private onPinMove = (e: PointerEvent): void => {
@@ -527,6 +536,8 @@ export class RoomTwinCard extends LitElement {
     }
     this.rawConfig = card;
     this._config = draft;
+    // Home Assistant has usually swapped this card for a new one by now, so the toast goes to its root.
+    this.fire("hass-notification", { message: "Saved to the dashboard." }, this.isConnected ? this : (document.querySelector("home-assistant") ?? this));
   };
 
   private get dirty(): boolean {
@@ -562,6 +573,7 @@ export class RoomTwinCard extends LitElement {
       role="button"
       tabindex="0"
       aria-pressed=${toggles ? String(state === "active") : nothing}
+      style=${styleMap({ "--roomtwin-active": state === "active" && stateObj ? activeColor(stateObj) : undefined })}
       title=${title}
       aria-label=${spoken ? `${name}: ${spoken}` : name}
     >
@@ -663,7 +675,7 @@ export class RoomTwinCard extends LitElement {
     .stage {
       position: relative;
       width: 100%;
-      background: #111;
+      background: var(--roomtwin-stage-background, #111);
     }
     .canvas {
       position: absolute;
@@ -697,6 +709,7 @@ export class RoomTwinCard extends LitElement {
       inset: 0;
       overflow: hidden;
       pointer-events: none;
+      isolation: isolate;
     }
     .pin {
       position: absolute;
@@ -706,13 +719,13 @@ export class RoomTwinCard extends LitElement {
       align-items: center;
       gap: 4px;
       box-sizing: border-box;
-      min-width: 36px;
-      height: 36px;
+      min-width: var(--roomtwin-pin-size, 36px);
+      height: var(--roomtwin-pin-size, 36px);
       padding: 0 6px;
       justify-content: center;
-      border-radius: 18px;
-      background: rgba(0, 0, 0, 0.55);
-      color: #fff;
+      border-radius: calc(var(--roomtwin-pin-size, 36px) / 2);
+      background: var(--roomtwin-pin-background, rgba(0, 0, 0, 0.55));
+      color: var(--roomtwin-pin-text-color, #fff);
       font-size: 13px;
       font-weight: 500;
       white-space: nowrap;
@@ -723,10 +736,10 @@ export class RoomTwinCard extends LitElement {
       -webkit-user-select: none;
       -webkit-touch-callout: none;
       will-change: transform;
-      --mdc-icon-size: 20px;
+      --mdc-icon-size: calc(var(--roomtwin-pin-size, 36px) * 5 / 9);
     }
     .pin.active {
-      background: var(--state-light-active-color, #ffb300);
+      background: var(--roomtwin-active);
       color: #000;
     }
     .pin.alert {
@@ -743,8 +756,8 @@ export class RoomTwinCard extends LitElement {
       outline: 2px solid var(--primary-color);
     }
     .pin svg {
-      width: 20px;
-      height: 20px;
+      width: var(--mdc-icon-size);
+      height: var(--mdc-icon-size);
       fill: currentColor;
     }
     .overlay {

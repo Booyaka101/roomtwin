@@ -123,22 +123,26 @@ function yamlLines(value: unknown, indent: string): string[] {
 /** The card config as the dashboard should store it, leaving out options that are at their default. */
 export function toCardConfig(config: RoomTwinConfig): Record<string, unknown> {
   const { type, splat, up, floor, ceiling_cut, aspect_ratio, lod, lod_scale, camera, lights, pins, ...rest } = config;
+  // Only the card's own numbers pick up float noise from sliders and taps. Actions and other cards' options stay exact.
+  const point = (v: Vec3) => v.map((n) => round(n));
   const ordered = {
     type,
     splat,
-    up,
-    floor: floor === 0 ? undefined : floor,
-    ceiling_cut,
+    up: point(up),
+    floor: floor === 0 ? undefined : round(floor),
+    ceiling_cut: ceiling_cut === undefined ? undefined : round(ceiling_cut),
     aspect_ratio,
     lod: lod ? undefined : false,
-    lod_scale: lod_scale === 1 ? undefined : lod_scale,
-    camera,
-    lights: lights.length ? lights : undefined,
-    pins: pins.length ? pins : undefined,
+    lod_scale: lod_scale === 1 ? undefined : round(lod_scale),
+    camera: camera && { position: point(camera.position), target: point(camera.target) },
+    lights: lights.length
+      ? lights.map((b) => ({ ...b, anchor: point(b.anchor), radius: round(b.radius), soft_edge: round(b.soft_edge), off_dim: round(b.off_dim) }))
+      : undefined,
+    pins: pins.length ? pins.map((b) => ({ ...b, anchor: point(b.anchor) })) : undefined,
     ...rest,
   };
   // The round trip drops options left undefined, down to a cleared label on one pin.
-  return JSON.parse(JSON.stringify(ordered, (_key, v: unknown) => (typeof v === "number" ? round(v) : v)));
+  return JSON.parse(JSON.stringify(ordered));
 }
 
 /** Card YAML for the dashboard's code editor. */
@@ -202,7 +206,6 @@ export class RoomTwinEditor extends LitElement {
     _message: { state: true },
     _copied: { state: true },
     _saving: { state: true },
-    _saved: { state: true },
     _saveError: { state: true },
     _history: { state: true },
   };
@@ -223,7 +226,6 @@ export class RoomTwinEditor extends LitElement {
   /** Writes the draft into the dashboard. Missing where the card can't save itself, like in the demo or a preview. */
   save?: () => Promise<void>;
   private _saving = false;
-  private _saved = false;
   private _saveError = "";
   private _history: RoomTwinConfig[] = [];
   // A slider drag is one step to undo, not one per pixel.
@@ -306,18 +308,27 @@ export class RoomTwinEditor extends LitElement {
   }
 
   private commit(config: RoomTwinConfig, drag = ""): void {
-    if (!drag || drag !== this.dragging) this._history = [...this._history, this.config];
+    if (!drag || drag !== this.dragging) this._history = [...this.steps(), this.config];
     this.dragging = drag;
     this.show(config);
   }
 
+  /** The undo history, minus a last step that changed nothing, like a slider let go where it started. */
+  private steps(): RoomTwinConfig[] {
+    const last = this._history[this._history.length - 1];
+    return last && toYaml(last) === toYaml(this.config) ? this._history.slice(0, -1) : this._history;
+  }
+
   private undo(): void {
-    const previous = this._history[this._history.length - 1];
+    const steps = this.steps();
+    const previous = steps[steps.length - 1];
     if (!previous) return;
-    this._history = this._history.slice(0, -1);
+    const selected = this.selectedBinding()?.entity;
+    this._history = steps.slice(0, -1);
     this.dragging = "";
     this.show(previous);
-    if (!this.selectedBinding()) this._selected = null;
+    // Undoing a removal shifts the indexes, so keep the selection only if it still points at the same entity.
+    if (this.selectedBinding()?.entity !== selected) this._selected = null;
   }
 
   private endDrag(): void {
@@ -327,7 +338,6 @@ export class RoomTwinEditor extends LitElement {
   private show(config: RoomTwinConfig): void {
     this.config = config;
     this._copied = "";
-    this._saved = false;
     this._saveError = "";
     this.dispatchEvent(new CustomEvent<RoomTwinConfig>("draft-changed", { detail: config }));
   }
@@ -359,7 +369,6 @@ export class RoomTwinEditor extends LitElement {
   }
 
   private async copy(): Promise<void> {
-    this._saved = false;
     this._saveError = "";
     this._copied = (await copyText(toYaml(this.config))) ? "ok" : "failed";
   }
@@ -368,11 +377,8 @@ export class RoomTwinEditor extends LitElement {
     this._saving = true;
     this._copied = "";
     this._saveError = "";
-    const sent = this.config;
     try {
       await this.save!();
-      // Edits made while the save was on its way weren't part of it.
-      this._saved = this.config === sent;
     } catch (err) {
       this._saveError = err instanceof SaveError ? err.message : `Couldn't save: ${(err as Error)?.message ?? err}.`;
     } finally {
@@ -387,7 +393,6 @@ export class RoomTwinEditor extends LitElement {
   private discard(): void {
     this.clearTask();
     this._copied = "";
-    this._saved = false;
     this._saveError = "";
     this._history = [];
     this.dispatchEvent(new CustomEvent("draft-discarded"));
@@ -490,7 +495,6 @@ export class RoomTwinEditor extends LitElement {
     if (this._saveError) {
       return html`<p class="note error" role="alert">${this._saveError} Copy the YAML into the card's code editor instead.</p>`;
     }
-    if (this._saved) return html`<p class="note" role="status">Saved to the dashboard.</p>`;
     if (this._copied === "ok") {
       return html`<p class="note" role="status">Copied. Paste it over this card's config, in the card's code editor or the dashboard's YAML file, and save.</p>`;
     }
@@ -553,7 +557,7 @@ export class RoomTwinEditor extends LitElement {
             </button>`
           : nothing}
         <button class=${this.save ? "" : "primary"} @click=${this.copy}>Copy YAML</button>
-        <button ?disabled=${!this._history.length} @click=${this.undo}>Undo</button>
+        <button ?disabled=${!this.steps().length} @click=${this.undo}>Undo</button>
         <button @click=${this.discard}>Discard changes</button>
         <button @click=${this.close}>Close</button>
       </section>

@@ -258,15 +258,30 @@ export class RoomScene {
   /** Up to ~100k opaque splat centres in capture coordinates, read once per mesh. */
   private centreSample(): Float32Array {
     if (this.sample) return this.sample;
+    if (this.disposed) return new Float32Array(0);
     const splats = this.mesh?.splats;
     // With LoD on, Spark keeps only the LoD tree and empties the flat array.
     const source = splats?.getNumSplats() ? splats : (splats as { lodSplats?: typeof splats } | undefined)?.lodSplats;
     if (!source) return new Float32Array(0);
-    const stride = Math.max(1, Math.floor(source.getNumSplats() / 100_000));
+    const count = source.getNumSplats();
+    const stride = Math.max(1, Math.floor(count / 100_000));
     const points: number[] = [];
-    source.forEachSplat((index, center, _scales, _q, opacity) => {
-      if (index % stride === 0 && opacity >= MIN_RAYCAST_OPACITY) points.push(center.x, center.y, center.z);
-    });
+    const keep = (center: THREE.Vector3, opacity: number) => {
+      if (opacity >= MIN_RAYCAST_OPACITY) points.push(center.x, center.y, center.z);
+    };
+    if ("getSplat" in source) {
+      // Reading only the sampled splats: walking all 1.7M of a big scan stalls a tablet for most of a second.
+      const readable = source as unknown as { getSplat(index: number): { center: THREE.Vector3; opacity: number } };
+      for (let i = 0; i < count; i += stride) {
+        const { center, opacity } = readable.getSplat(i);
+        keep(center, opacity);
+      }
+    } else {
+      // A paged .rad scan can't be read by index.
+      source.forEachSplat((index, center, _scales, _q, opacity) => {
+        if (index % stride === 0) keep(center, opacity);
+      });
+    }
     this.sample = new Float32Array(points);
     return this.sample;
   }

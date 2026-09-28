@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { parse } from "yaml";
 import { parseConfig, type Vec3 } from "../src/config";
-import { ceilingCutRange, CollinearError, floorFromPoints, toYaml } from "../src/editor";
+import { CollinearError, floorFromPoints, roomRanges, toYaml } from "../src/editor";
 
 describe("floorFromPoints", () => {
   test("a level floor gives +Y up and its height", () => {
@@ -62,6 +62,7 @@ describe("toYaml", () => {
     ],
     grid_options: { columns: "full" },
     visibility: [{ condition: "screen", media_query: "(min-width: 600px)" }],
+    card_mod: { style: "ha-card {\n  border: none;\n}\n" },
   };
 
   test("round-trips a full config through YAML and back into the card's parser", () => {
@@ -103,20 +104,21 @@ describe("toYaml", () => {
   });
 });
 
-describe("ceilingCutRange", () => {
-  test("a metric room starts just under its ceiling", () => {
-    expect(ceilingCutRange(2.6, undefined)).toEqual({ max: 4, suggested: 2.34 });
+describe("roomRanges", () => {
+  test("a metric room gets centimetre steps and a cut just under its ceiling", () => {
+    expect(roomRanges(2.6)).toEqual({ step: 0.01, radiusMax: 5.2, softEdgeMax: 2.6, cutMax: 3.2, suggestedCut: 2.34 });
   });
 
-  test("an unscaled COLMAP capture gets a range that fits it", () => {
-    expect(ceilingCutRange(8.62, undefined)).toEqual({ max: 11, suggested: 7.76 });
+  test("an unscaled COLMAP capture gets ranges that fit it", () => {
+    expect(roomRanges(8.62)).toEqual({ step: 0.01, radiusMax: 17.3, softEdgeMax: 8.7, cutMax: 10.4, suggestedCut: 7.76 });
   });
 
-  test("a saved cut beyond the room still fits on the slider", () => {
-    expect(ceilingCutRange(2.6, 7.3).max).toBe(8);
+  test("a capture in small units gets finer steps", () => {
+    expect(roomRanges(0.4)).toEqual({ step: 0.001, radiusMax: 0.8, softEdgeMax: 0.4, cutMax: 0.48, suggestedCut: 0.36 });
   });
 
-  test("an empty or flat capture falls back to sane values", () => {
-    expect(ceilingCutRange(0, undefined)).toEqual({ max: 3, suggested: 0.5 });
+  test("an empty or flat capture falls back to a normal room", () => {
+    expect(roomRanges(0)).toEqual({ step: 0.01, radiusMax: 5, softEdgeMax: 2.5, cutMax: 3, suggestedCut: 2.25 });
   });
 });
+

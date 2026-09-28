@@ -5,6 +5,9 @@ import type { HassEntity } from "./hass";
 
 export type Rgb = [number, number, number];
 
+// HA also reports rgb_color for a white bulb in color_temp mode, but the capture already shows that warmth.
+const COLOR_MODES = new Set(["hs", "xy", "rgb", "rgbw", "rgbww"]);
+
 function validRgb(value: unknown): value is Rgb {
   return (
     Array.isArray(value) &&
@@ -16,8 +19,8 @@ function validRgb(value: unknown): value is Rgb {
 
 /**
  * Multiplier applied to the splats around a light. Anything but "on" (off, unavailable,
- * a missing entity) dims to off_dim; "on" scales from off_dim up to 1 with brightness and
- * takes its hue from rgb_color normalised so the brightest channel is 1.
+ * a missing entity) dims to off_dim; "on" scales from off_dim up to 1 with brightness and,
+ * in a colour mode, takes its hue from rgb_color normalised so the brightest channel is 1.
  */
 export function lightColor(state: HassEntity | undefined, offDim: number): Rgb {
   if (!state || state.state !== "on") return [offDim, offDim, offDim];
@@ -25,7 +28,8 @@ export function lightColor(state: HassEntity | undefined, offDim: number): Rgb {
   const brightness = typeof raw === "number" && Number.isFinite(raw) ? Math.min(Math.max(raw, 0), 255) : 255;
   const f = offDim + (1 - offDim) * (brightness / 255);
   const rgb = state.attributes.rgb_color;
-  if (!validRgb(rgb)) return [f, f, f];
+  const mode = state.attributes.color_mode;
+  if (!validRgb(rgb) || (typeof mode === "string" && !COLOR_MODES.has(mode))) return [f, f, f];
   const max = Math.max(...rgb);
   return [(f * rgb[0]) / max, (f * rgb[1]) / max, (f * rgb[2]) / max];
 }

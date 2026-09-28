@@ -10,5 +10,5 @@ First release.
 - Optional ceiling cut to look into the room from above.
 - Edit mode for admins: tap the room to place lights and pins, tune them with sliders, set the floor from three taps, save the current view as the default, and copy the result as YAML.
 - Clear messages for a missing file, an unreachable server, an oversized `.ply`, no WebGL2 and a lost graphics context.
-- Cards stop rendering while off-screen or on a hidden tab.
+- Cards load their room when first scrolled into view, and stop rendering while off-screen or on a hidden tab.
 - `tools/capture/capture.ps1` turns a video or photos into a splat with ffmpeg, COLMAP and Brush, and `tools/capture/ply-to-spz.mjs` converts `.ply` to `.spz`.

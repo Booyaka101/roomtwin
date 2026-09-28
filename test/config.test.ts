@@ -99,6 +99,15 @@ describe("parseConfig", () => {
     expect(config.grid_options).toEqual({ columns: 12 });
     expect(config.visibility).toHaveLength(1);
   });
+
+  test("card_mod styling is kept", () => {
+    expect(parseConfig({ ...base, card_mod: { style: "ha-card { border: none; }" } }).card_mod).toBeDefined();
+  });
+
+  test("an option left empty in YAML falls back to its default", () => {
+    const config = parseConfig({ ...base, floor: null, lod_scale: null, ceiling_cut: null });
+    expect([config.floor, config.lod_scale, config.ceiling_cut]).toEqual([0, 1, undefined]);
+  });
 });
 
 test("splatExtension ignores query strings and dots in folders", () => {

@@ -66,6 +66,7 @@ export class RoomTwinCard extends LitElement {
   private pinEls: HTMLElement[] = [];
   private pins: StagePin[] = [];
   private pressed = -1;
+  private pinPointer?: PointerEvent;
   private tapStart?: { x: number; y: number; t: number };
   private readonly tmp = new THREE.Vector3();
   private readonly press = new PressGesture(
@@ -78,10 +79,15 @@ export class RoomTwinCard extends LitElement {
   }
 
   setConfig(raw: unknown): void {
+    const old = this._config;
     this._config = parseConfig(raw);
     this._draft = null;
     this._editing = false;
-    if (this.scene?.mesh && this.loadKey(this._config) === this.loadedKey) this.applyConfig(this._config, true);
+    this.scene?.showHelper(null);
+    if (this.scene?.mesh && this.loadKey(this._config) === this.loadedKey) {
+      // HA's card editor calls this on every keystroke; only jump the camera when the saved view changed.
+      this.applyConfig(this._config, JSON.stringify(old?.camera) !== JSON.stringify(this._config.camera));
+    }
   }
 
   set hass(hass: HomeAssistant) {
@@ -128,7 +134,10 @@ export class RoomTwinCard extends LitElement {
     super.connectedCallback();
     clearTimeout(this.disposeTimer);
     document.addEventListener("visibilitychange", this.updateActive);
-    if (this.hasUpdated) this.observe();
+    if (this.hasUpdated) {
+      this.observe();
+      this.requestUpdate();
+    }
   }
 
   disconnectedCallback(): void {
@@ -148,6 +157,7 @@ export class RoomTwinCard extends LitElement {
     this.intersection = new IntersectionObserver((entries) => {
       this.onScreen = entries.some((e) => e.isIntersecting);
       this.updateActive();
+      if (this.onScreen) this.requestUpdate();
     });
     this.intersection.observe(host);
     this.resize?.disconnect();
@@ -166,6 +176,7 @@ export class RoomTwinCard extends LitElement {
     this.scene?.dispose();
     this.scene = undefined;
     this.loadedKey = "";
+    this._status = { kind: "loading", progress: 0 };
   }
 
   protected firstUpdated(): void {
@@ -175,7 +186,8 @@ export class RoomTwinCard extends LitElement {
   protected updated(changed: PropertyValues): void {
     super.updated(changed);
     const config = this.shown;
-    if (config && this.canvasHost && this.loadedKey !== this.loadKey(config)) void this.load(config);
+    // Waiting until the card is first on screen keeps a dashboard of rooms from downloading all of them at once.
+    if (config && this.canvasHost && this.onScreen && this.loadedKey !== this.loadKey(config)) void this.load(config);
     this.pins = config ? stagePins(config) : [];
     this.pinEls = [...this.renderRoot.querySelectorAll<HTMLElement>(".pin")];
     this.positionPins();
@@ -281,8 +293,42 @@ export class RoomTwinCard extends LitElement {
   private onPinDown(e: PointerEvent): void {
     const el = (e.target as Element).closest<HTMLElement>(".pin");
     if (!el) return;
+    if (!e.isPrimary) {
+      this.handToControls(e);
+      return;
+    }
     this.pressed = Number(el.dataset.i);
+    // Keeps the release on the pin when the pointer slips off it, which would otherwise read as a long-press.
+    el.setPointerCapture(e.pointerId);
+    this.pinPointer = e;
     this.press.down(e);
+  }
+
+  private onPinUp = (e: PointerEvent): void => {
+    this.pinPointer = undefined;
+    this.press.up(e);
+  };
+
+  private onPinCancel = (): void => {
+    this.pinPointer = undefined;
+    this.press.cancel();
+  };
+
+  /** A second finger means a pinch, so any finger on a pin goes to the orbit controls instead. */
+  private handToControls(extra?: PointerEvent): void {
+    const canvas = this.scene?.renderer.domElement;
+    if (!canvas) return;
+    this.press.cancel();
+    for (const e of [this.pinPointer, extra]) {
+      if (!e) continue;
+      canvas.dispatchEvent(new PointerEvent("pointerdown", e));
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch {
+        // Already lifted.
+      }
+    }
+    this.pinPointer = undefined;
   }
 
   private onPinKey(e: KeyboardEvent): void {
@@ -294,6 +340,7 @@ export class RoomTwinCard extends LitElement {
   }
 
   private onStageDown(e: PointerEvent): void {
+    if (!e.isPrimary) this.handToControls();
     this.tapStart = this._editing && e.isPrimary ? { x: e.clientX, y: e.clientY, t: e.timeStamp } : undefined;
   }
 
@@ -329,6 +376,10 @@ export class RoomTwinCard extends LitElement {
     this.scene?.showHelper(null);
     this.applyConfig(this._config!, false);
   }
+
+  private getView = () => this.scene!.currentView();
+
+  private getRoomHeight = () => this.scene!.roomBounds().max.y;
 
   private onHelper(e: CustomEvent<HelperDetail>): void {
     this.scene?.showHelper(e.detail.anchor, e.detail.radius);
@@ -384,8 +435,8 @@ export class RoomTwinCard extends LitElement {
               class="pins"
               @pointerdown=${this.onPinDown}
               @pointermove=${this.press.move}
-              @pointerup=${this.press.up}
-              @pointercancel=${this.press.cancel}
+              @pointerup=${this.onPinUp}
+              @pointercancel=${this.onPinCancel}
               @keydown=${this.onPinKey}
               @contextmenu=${(e: Event) => e.preventDefault()}
             >
@@ -407,13 +458,13 @@ export class RoomTwinCard extends LitElement {
           : nothing}
       </div>
       ${this._warning ? html`<ha-alert alert-type="warning">${this._warning}</ha-alert>` : nothing}
-      ${this._editing && this._draft && hass
+      ${this._editing && this._draft && hass && ready
         ? html`<roomtwin-editor
             .hass=${hass}
             .config=${this._draft}
             .dirty=${this._draft !== this._config}
-            .getView=${() => this.scene!.currentView()}
-            .getRoomHeight=${() => this.scene!.roomBounds().max.y}
+            .getView=${this.getView}
+            .getRoomHeight=${this.getRoomHeight}
             @draft-changed=${this.onDraft}
             @draft-discarded=${this.onDiscard}
             @helper-changed=${this.onHelper}

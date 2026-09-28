@@ -43,6 +43,8 @@ $Source = (Resolve-Path -LiteralPath $Source).Path
 $isVideo = -not (Test-Path -LiteralPath $Source -PathType Container)
 if (-not $Name) { $Name = [IO.Path]::GetFileNameWithoutExtension($Source) }
 if (-not $WorkDir) { $WorkDir = Join-Path (Get-Location) "roomtwin-capture\$Name" }
+# Windows PowerShell passes a quoted path ending in \ to native tools as an escaped quote.
+$WorkDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($WorkDir).TrimEnd('\')
 
 if ($isVideo) { Resolve-Tool $Ffmpeg "Install it with 'winget install Gyan.FFmpeg' or pass -Ffmpeg <path to ffmpeg.exe>." }
 Resolve-Tool $Colmap "Download COLMAP from https://github.com/colmap/colmap/releases and pass -Colmap <path to colmap.exe>, or add it to PATH."
@@ -78,7 +80,7 @@ Invoke-Step "COLMAP matching ($matcher)" $Colmap @($matcher, "--database_path", 
 Invoke-Step "COLMAP mapping" $Colmap @("mapper", "--database_path", $database, "--image_path", $images, "--output_path", $sparse)
 
 # The mapper can split a poor capture into several models; the largest one is the room.
-$models = Get-ChildItem -LiteralPath $sparse -Directory | Sort-Object { (Get-Item (Join-Path $_.FullName "images.bin")).Length } -Descending
+$models = Get-ChildItem -LiteralPath $sparse -Directory | Sort-Object { (Get-Item -LiteralPath (Join-Path $_.FullName "images.bin")).Length } -Descending
 if (-not $models) { throw "COLMAP could not reconstruct any cameras. The video probably moves too fast or shows too many blank walls; see tools/capture/README.md." }
 if ($models.Count -gt 1) { Write-Warning "COLMAP split the capture into $($models.Count) pieces; using the largest. Parts of the room may be missing." }
 

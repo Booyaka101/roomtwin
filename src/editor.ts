@@ -38,14 +38,29 @@ export function floorFromPoints(points: [Vec3, Vec3, Vec3], viewer: Vec3): { up:
   return { up: up.map((n) => round(n)) as Vec3, floor: round(floor) };
 }
 
+export interface RoomRanges {
+  step: number;
+  radiusMax: number;
+  softEdgeMax: number;
+  cutMax: number;
+  suggestedCut: number;
+}
+
 /**
- * Slider range and starting value for the ceiling cut, from the room's measured height. Captures
- * without real-world scale can be any size, so a fixed range in metres would not fit them.
+ * Slider ranges for lengths, from the room's measured height. Captures without real-world scale
+ * can be any size, so fixed ranges in metres would not fit them.
  */
-export function ceilingCutRange(roomHeight: number, cut: number | undefined): { max: number; suggested: number } {
+export function roomRanges(roomHeight: number): RoomRanges {
+  const height = roomHeight > 0 ? roomHeight : 2.5;
+  const places = Math.max(0, 2 - Math.floor(Math.log10(height)));
+  const coarse = 10 ** (places - 1);
+  const roundUp = (n: number) => round(Math.ceil(n * coarse - 1e-9) / coarse, places);
   return {
-    max: Math.max(3, Math.ceil(roomHeight * 1.2), Math.ceil(cut ?? 0)),
-    suggested: round(Math.max(0.5, roomHeight * 0.9), 2),
+    step: 10 ** -places,
+    radiusMax: roundUp(height * 2),
+    softEdgeMax: roundUp(height),
+    cutMax: roundUp(height * 1.2),
+    suggestedCut: round(height * 0.9, places),
   };
 }
 
@@ -301,7 +316,7 @@ export class RoomTwinEditor extends LitElement {
       <input
         type="range"
         min=${min}
-        max=${max}
+        max=${Math.max(max, binding[key])}
         step=${step}
         .value=${String(binding[key])}
         @input=${(e: Event) =>
@@ -342,9 +357,11 @@ export class RoomTwinEditor extends LitElement {
     }
     const binding = this.selectedBinding();
     if (binding && this._selected) {
+      const ranges = roomRanges(this.getRoomHeight());
       return html`<p><strong>${this.name(binding.entity)}</strong>. Tap the room to move it.</p>
         ${this._selected.kind === "light"
-          ? html`${this.slider("Radius (m)", "radius", 0.1, 10, 0.05)} ${this.slider("Soft edge (m)", "soft_edge", 0, 5, 0.05)}
+          ? html`${this.slider("Radius (m)", "radius", ranges.step * 10, ranges.radiusMax, ranges.step)}
+            ${this.slider("Soft edge (m)", "soft_edge", 0, ranges.softEdgeMax, ranges.step)}
             ${this.slider("Brightness when off", "off_dim", 0, 1, 0.01)}`
           : html`<label class="slider"
               ><span>Label</span
@@ -366,10 +383,10 @@ export class RoomTwinEditor extends LitElement {
 
   protected render() {
     const cut = this.config.ceiling_cut;
-    const { max: cutMax, suggested: suggestedCut } = ceilingCutRange(this.getRoomHeight(), cut);
+    const { step, cutMax, suggestedCut } = roomRanges(this.getRoomHeight());
     const bindings = [
-      ...this.config.lights.map((b, index) => ({ kind: "light" as const, index, entity: b.entity })),
-      ...this.config.pins.map((b, index) => ({ kind: "pin" as const, index, entity: b.entity })),
+      ...this.config.lights.map((b, index) => ({ kind: "light" as const, index, entity: b.entity, name: undefined })),
+      ...this.config.pins.map((b, index) => ({ kind: "pin" as const, index, entity: b.entity, name: b.name })),
     ];
     return html`
       <section class="task">
@@ -382,7 +399,7 @@ export class RoomTwinEditor extends LitElement {
                 class=${this._selected?.kind === b.kind && this._selected.index === b.index ? "chip selected" : "chip"}
                 @click=${() => this.select(b.kind, b.index)}
               >
-                ${b.kind === "light" ? "💡" : "📍"} ${this.hass.states[b.entity]?.attributes.friendly_name ?? b.entity}
+                ${b.kind === "light" ? "💡" : "📍"} ${b.name ?? this.hass.states[b.entity]?.attributes.friendly_name ?? b.entity}
               </button>`,
             )}
           </section>`
@@ -393,9 +410,9 @@ export class RoomTwinEditor extends LitElement {
             this.commit({ ...this.config, ceiling_cut: (e.target as HTMLInputElement).checked ? suggestedCut : undefined })} /> Ceiling cut</span>
           <input
             type="range"
-            min="0.5"
-            max=${cutMax}
-            step="0.05"
+            min=${step * 10}
+            max=${Math.max(cutMax, cut ?? 0)}
+            step=${step}
             ?disabled=${cut === undefined}
             .value=${String(cut ?? suggestedCut)}
             @input=${(e: Event) => this.commit({ ...this.config, ceiling_cut: Number((e.target as HTMLInputElement).value) })}

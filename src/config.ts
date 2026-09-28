@@ -35,10 +35,11 @@ export interface RoomTwinConfig {
   grid_options?: unknown;
   layout_options?: unknown;
   visibility?: unknown;
+  card_mod?: unknown;
 }
 
-// Added by the dashboard editor on any card; kept as-is so emitted YAML doesn't drop them.
-const PASSTHROUGH = ["view_layout", "grid_options", "layout_options", "visibility"] as const;
+// Added by the dashboard editor on any card, or by card-mod; kept as-is so emitted YAML doesn't drop them.
+const PASSTHROUGH = ["view_layout", "grid_options", "layout_options", "visibility", "card_mod"] as const;
 
 // Scaniverse .spz and COLMAP-based .ply captures (Brush, gsplat, Postshot) all load into Spark with Y pointing down.
 export const DEFAULT_UP: Vec3 = [0, -1, 0];
@@ -88,7 +89,8 @@ function number(
   path: string,
   { min, max, fallback }: { min?: number; max?: number; fallback?: number },
 ): number {
-  if (value === undefined && fallback !== undefined) return fallback;
+  // An option left empty in YAML ("floor:") arrives as null.
+  if ((value === undefined || value === null) && fallback !== undefined) return fallback;
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new ConfigError(`${path} must be a number, got ${describe(value)}`);
   }

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import * as THREE from "three";
 import { SplatEdit, SplatEditRgbaBlendMode, SplatEditSdf, SplatEditSdfType } from "@sparkjsdev/spark";
-import { LightRig, lightColor } from "../src/lights";
+import { LightRig, lightColor, type Rgb } from "../src/lights";
 import type { Vec3 } from "../src/config";
 import { entity } from "./helpers";
 
@@ -21,6 +21,13 @@ describe("lightColor", () => {
   test("half brightness with a warm colour", () => {
     const color = lightColor(entity("light.lamp", "on", { brightness: 128, rgb_color: [255, 180, 120] }), 0.45);
     expectRgb(color, [0.72608, 0.51253, 0.34168]);
+    const hs = { brightness: 128, rgb_color: [255, 180, 120] as Rgb, color_mode: "hs" };
+    expectRgb(lightColor(entity("light.lamp", "on", hs), 0.45), [0.72608, 0.51253, 0.34168]);
+  });
+
+  test("a white bulb in color_temp mode is not tinted by the rgb_color HA derives for it", () => {
+    const warm = { brightness: 255, color_mode: "color_temp", color_temp_kelvin: 2700, rgb_color: [255, 167, 87] as Rgb };
+    expectRgb(lightColor(entity("light.lamp", "on", warm), 0.45), [1, 1, 1]);
   });
 
   test("unavailable and missing entities count as off", () => {

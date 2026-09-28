@@ -38,6 +38,8 @@ From the repo root in PowerShell:
   -Colmap C:\tools\colmap\bin\colmap.exe -Brush C:\tools\brush\brush_app.exe
 ```
 
+If PowerShell says running scripts is disabled on this system, start it through `powershell -ExecutionPolicy Bypass -File .\tools\capture\capture.ps1` with the same parameters instead.
+
 The work goes into `.\roomtwin-capture\living\`. For scale, 112 frames took 9 minutes end to end on an RTX 4090, most of it Brush training. The last lines tell you the file to copy:
 
 ```

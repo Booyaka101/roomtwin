@@ -82,7 +82,7 @@ Nothing is saved until step 5. The editor says so while you have unsaved changes
 - **Long-press** any pin to open the more-info dialog. Tapping a sensor or anything else that can't toggle opens more-info too.
 - Sensor pins show the current state with its unit and update live.
 - A pin whose entity doesn't exist shows as a grey question mark, so a renamed entity is easy to spot.
-- Cards that are scrolled off-screen, or on a hidden tab, stop rendering entirely, so several rooms on one dashboard cost nothing until you look at them.
+- A card doesn't download its room until it first scrolls into view, and cards that are off-screen or on a hidden tab stop rendering entirely. Several rooms on one dashboard only cost what you look at.
 
 ## Configuration reference
 
@@ -133,7 +133,7 @@ Anchors and the camera are stored in the capture's own coordinates, so re-runnin
 Each light multiplies the colour of the splats inside its soft sphere:
 
 - off, unavailable or missing: `off_dim` on every channel.
-- on: `f = off_dim + (1 - off_dim) × brightness / 255`, tinted by `rgb_color` scaled so its brightest channel is 1. With no `rgb_color` the tint is white.
+- on: `f = off_dim + (1 - off_dim) × brightness / 255`. A light in a colour mode (`hs`, `xy`, `rgb`, `rgbw`, `rgbww`) is tinted by its `rgb_color`, scaled so the brightest channel is 1. Otherwise the tint is white, including white bulbs in `color_temp` mode, since the capture already shows their warmth.
 
 So at the default `off_dim` of 0.45 a light at full brightness leaves its region exactly as captured, and switching it off darkens it to 45%. Capture the room with the lights on for the best result.
 

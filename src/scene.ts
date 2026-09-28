@@ -17,7 +17,10 @@ export interface LoadResult {
 
 export function webgl2Available(): boolean {
   try {
-    return !!document.createElement("canvas").getContext("webgl2");
+    const gl = document.createElement("canvas").getContext("webgl2");
+    // Browsers cap live contexts at around 16, so don't leave the probe holding one.
+    gl?.getExtension("WEBGL_lose_context")?.loseContext();
+    return !!gl;
   } catch {
     return false;
   }
@@ -108,6 +111,7 @@ export class RoomScene {
   private floor = 0;
   private ceilingHeight: number | undefined;
   private sample: Float32Array | null = null;
+  private bounds: THREE.Box3 | null = null;
   private active = false;
   private queued = false;
   private pending = true;
@@ -169,6 +173,7 @@ export class RoomScene {
     }
     this.mesh = mesh;
     this.sample = null;
+    this.bounds = null;
     this.root.add(mesh);
     this.requestRender();
     return { warning: plyWarning(url, bytes.length) };
@@ -186,6 +191,7 @@ export class RoomScene {
     this.root.quaternion.setFromUnitVectors(this.up, Y_UP);
     this.root.position.set(0, -floor, 0);
     this.root.updateMatrixWorld(true);
+    this.bounds = null;
     this.updateCeiling();
     this.requestRender();
   }
@@ -219,6 +225,11 @@ export class RoomScene {
 
   /** Room-frame bounds from a sample of splat centres, trimming the stray floaters every capture has. */
   roomBounds(): THREE.Box3 {
+    this.bounds ??= this.measureBounds();
+    return this.bounds.clone();
+  }
+
+  private measureBounds(): THREE.Box3 {
     const box = new THREE.Box3();
     const sample = this.centreSample();
     if (sample.length === 0) return box;
@@ -335,11 +346,13 @@ export class RoomScene {
 
   /** Outlines a light's sphere (or marks a bare point) while editing. */
   showHelper(anchor: Vec3 | null, radius = 0): void {
-    this.helpers.clear();
+    this.clearHelpers();
     if (anchor) {
       const center = this.captureToWorld(anchor, new THREE.Vector3());
+      const bounds = this.roomBounds();
+      const extent = bounds.isEmpty() ? 4 : Math.max(...bounds.getSize(new THREE.Vector3()).toArray());
       const dot = new THREE.Mesh(
-        new THREE.SphereGeometry(0.04, 12, 8),
+        new THREE.SphereGeometry(extent / 150, 12, 8),
         new THREE.MeshBasicMaterial({ color: 0xffc107, depthTest: false }),
       );
       dot.position.copy(center);
@@ -354,6 +367,14 @@ export class RoomScene {
       }
     }
     this.requestRender();
+  }
+
+  private clearHelpers(): void {
+    for (const helper of this.helpers.children as (THREE.Mesh | THREE.LineSegments)[]) {
+      helper.geometry.dispose();
+      (helper.material as THREE.Material).dispose();
+    }
+    this.helpers.clear();
   }
 
   resize(width: number, height: number): void {
@@ -389,6 +410,7 @@ export class RoomScene {
   dispose(): void {
     this.disposed = true;
     cancelAnimationFrame(this.rafId);
+    this.clearHelpers();
     this.controls.dispose();
     this.mesh?.dispose();
     this.spark.dispose();

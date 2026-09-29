@@ -2,7 +2,7 @@ import { LitElement, css, html, nothing, type PropertyValues } from "lit";
 import { styleMap } from "lit/directives/style-map.js";
 import * as THREE from "three";
 import { aspectRatio, bindingRefs, parseConfig, type BindingRef, type RoomTwinConfig } from "./config";
-import { canSave, dashboardUrlPath, saveCard } from "./dashboard";
+import { canSave, dashboardUrlPath, saveCard, viewPath } from "./dashboard";
 import { toCardConfig, toYaml, type HelperDetail, type RoomTwinEditor, type Selected } from "./editor";
 import type { HassEntity, HomeAssistant } from "./hass";
 import { LightRig } from "./lights";
@@ -14,11 +14,11 @@ import { VERSION } from "./version";
 const DISPOSE_AFTER_MS = 60_000;
 // HA's card editor makes a new preview card each time it opens, and browsers cap live WebGL contexts at a handful.
 const PREVIEW_DISPOSE_AFTER_MS = 3_000;
-// The card editor calls setConfig on every keystroke in the splat path.
+// HA's card editor swaps in a new preview card on every change, down to each keystroke in the splat path.
 const PREVIEW_LOAD_DELAY_MS = 600;
 // A browser that keeps dropping the 3D view gets the Try again button instead of a reload loop.
 const AUTO_RELOAD_GAP_MS = 60_000;
-const TAP_SLOP_PX = 6;
+const TAP_SLOP_PX = 10;
 const TAP_MAX_MS = 500;
 
 const MDI_PENCIL =
@@ -91,7 +91,7 @@ export class RoomTwinCard extends LitElement {
   private readonly press = new PressGesture<BindingRef>({
     tap: (pin) => this.pinTap(pin),
     hold: (pin) => this.pinHold(pin),
-    hasDoubleTap: (pin) => !this._editing && !!pin.double_tap_action,
+    hasDoubleTap: (pin) => !this._editing && !!pin.double_tap_action && pin.double_tap_action.action !== "none",
     doubleTap: (pin) => this.fire("hass-action", { config: pin, action: "double_tap" }),
   });
 
@@ -143,7 +143,7 @@ export class RoomTwinCard extends LitElement {
     this._editing = false;
     this.scene?.showHelper(null);
     if (this.scene?.mesh && this.loadKey(this._config) === this.loadedKey) {
-      // HA's card editor calls this on every keystroke; only move the camera when the saved view changed.
+      // Only move the camera when the saved view changed, not on every edit to the rest.
       this.applyConfig(this._config, JSON.stringify(old?.camera) !== JSON.stringify(this._config.camera) ? "glide" : null);
     }
   }
@@ -219,6 +219,8 @@ export class RoomTwinCard extends LitElement {
     this.press.forget();
     this.onScreen = false;
     this.updateActive();
+    // A preview card that goes away mid-load has usually been swapped for a new one, so it stops parsing now.
+    if (this.preview && this._status.kind === "loading") this.teardown();
     this.disposeTimer = setTimeout(() => this.teardown(), this.preview || this.replaced ? PREVIEW_DISPOSE_AFTER_MS : DISPOSE_AFTER_MS);
   }
 
@@ -281,7 +283,7 @@ export class RoomTwinCard extends LitElement {
   }
 
   private scheduleLoad(config: RoomTwinConfig): void {
-    if (!this.preview || (!this.scene && this._status.kind !== "error")) {
+    if (!this.preview) {
       void this.load(config);
       return;
     }
@@ -378,6 +380,12 @@ export class RoomTwinCard extends LitElement {
       return { ...box, flipped: flipsLabel(box, width) };
     });
     const tucked = tuckedLabels(boxes);
+    // Nearer pins on top, ranked the way tuckedLabels ranks them so the pin keeping its label is the one drawn over the rest.
+    const layer = new Array<number>(boxes.length);
+    boxes
+      .map((_, i) => i)
+      .sort((a, b) => boxes[a].depth - boxes[b].depth)
+      .forEach((i, rank) => (layer[i] = boxes.length - rank));
     this.pinEls.forEach((el, i) => {
       const p = boxes[i];
       // A flipped pin hangs from the icon's right edge, so the icon stays put when hovering shows a tucked label.
@@ -386,8 +394,7 @@ export class RoomTwinCard extends LitElement {
         : `translate(${p.x - p.size / 2}px, ${p.y - p.size / 2}px)`;
       el.classList.toggle("flipped", !!p.flipped);
       el.style.visibility = p.visible ? "" : "hidden";
-      // Nearer pins on top, to the centimetre.
-      el.style.zIndex = String(Math.max(0, Math.round(100_000 - p.depth * 100)));
+      el.style.zIndex = String(layer[i]);
       el.classList.toggle("tucked", tucked[i]);
     });
   };
@@ -479,6 +486,12 @@ export class RoomTwinCard extends LitElement {
     const el = (e.target as Element).closest<HTMLElement>(".pin");
     const pin = el ? this.pins[Number(el.dataset.i)] : undefined;
     if (!pin) return;
+    if (this._editing) {
+      // Delete on a focused pin means that pin, not whichever one was selected before.
+      if (e.key === "Delete" || e.key === "Backspace") this.editor?.select(pin.kind, pin.index);
+      this.editor?.handleKey(e);
+      if (e.defaultPrevented) return;
+    }
     if (e.key === "ContextMenu" || (e.key === "Enter" && e.shiftKey)) {
       e.preventDefault();
       this.pinHold(pin);
@@ -521,6 +534,7 @@ export class RoomTwinCard extends LitElement {
   }
 
   private onStageKey(e: KeyboardEvent): void {
+    if (this._editing) this.editor?.handleKey(e);
     if (e.key !== "Home") return;
     e.preventDefault();
     this.resetView();
@@ -551,12 +565,14 @@ export class RoomTwinCard extends LitElement {
     this._draft ??= this._config!;
     this._editing = true;
     this.applyConfig(this._draft, null);
+    void this.updateComplete.then(() => this.editor?.focusTask());
   }
 
   private closeEditor(): void {
     this._editing = false;
     this.scene?.showHelper(null);
     this.applyConfig(this._config!, null);
+    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>("button.edit")?.focus());
   }
 
   private onDraft(e: CustomEvent<RoomTwinConfig>): void {
@@ -576,7 +592,7 @@ export class RoomTwinCard extends LitElement {
     // Set first: the new cards can arrive before the save call returns.
     this.replaced = true;
     try {
-      await saveCard(this._hass!, dashboardUrlPath(location.pathname), this.rawConfig!, card);
+      await saveCard(this._hass!, dashboardUrlPath(location.pathname), this.rawConfig!, card, viewPath(location.pathname));
     } catch (err) {
       this.replaced = false;
       throw err;
@@ -614,7 +630,8 @@ export class RoomTwinCard extends LitElement {
     const name = pin.name ?? stateObj?.attributes.friendly_name ?? pin.entity;
     const title = stateObj ? name : `${pin.entity} is not in Home Assistant`;
     const spoken = spokenState(hass, stateObj);
-    const toggles = !pin.tap_action && tapService(stateObj)?.service === "toggle";
+    const tapToggles = !pin.tap_action || (pin.tap_action.action === "toggle" && !pin.tap_action.entity);
+    const toggles = tapToggles && tapService(stateObj)?.service === "toggle";
     const selected = this._editing && this._selected?.kind === pin.kind && this._selected.index === pin.index;
     return html`<div
       class="pin ${state} ${pin.kind} ${selected ? "selected" : ""}"
@@ -699,7 +716,7 @@ export class RoomTwinCard extends LitElement {
               </button>
               ${hass?.user?.is_admin && !this._editing
                 ? html`<button
-                    class=${this.dirty ? "unsaved" : ""}
+                    class=${this.dirty ? "edit unsaved" : "edit"}
                     title=${this.dirty ? "Edit pins and lights (unsaved changes)" : "Edit pins and lights"}
                     aria-label=${this.dirty ? "Edit pins and lights, unsaved changes" : "Edit pins and lights"}
                     @click=${this.openEditor}

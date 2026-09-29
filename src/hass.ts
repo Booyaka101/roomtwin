@@ -27,6 +27,7 @@ export interface HomeAssistant {
   ): Promise<unknown>;
   callWS?<T>(message: Record<string, unknown>): Promise<T>;
   formatEntityState?(stateObj: HassEntity): string;
+  formatEntityAttributeValue?(stateObj: HassEntity, attribute: string): string;
 }
 
 export function domainOf(entityId: string): string {

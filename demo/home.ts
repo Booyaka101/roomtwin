@@ -26,6 +26,16 @@ const CLASS_ALIASES: Record<string, string> = {
   shutters: "shutter",
 };
 const TOGGLES = new Set(["light", "switch", "fan", "input_boolean"]);
+const MEDIA = new Map<string, (state: string) => string>([
+  ["media_play", () => "playing"],
+  ["media_pause", () => "paused"],
+  ["media_play_pause", (state) => (state === "playing" ? "paused" : "playing")],
+  ["media_stop", () => "idle"],
+  ["turn_on", () => "idle"],
+  ["turn_off", () => "off"],
+  ["toggle", (state) => (state === "off" ? "idle" : "off")],
+]);
+const USER = { is_admin: true };
 // HA clears these while a light is off and brings them back when it turns on again.
 const OFF_LOOK = { brightness: null, rgb_color: null, color_temp_kelvin: null, color_mode: null };
 const WARM_WHITE = { color_mode: "color_temp", color_temp_kelvin: 3000, rgb_color: [255, 180, 107] };
@@ -48,6 +58,15 @@ const BINARY_TEXT: Record<string, [string, string]> = {
 function titleCase(objectId: string): string {
   const words = objectId.replace(/_/g, " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** HA's rgb_color for an hs_color, which it works out at full brightness. */
+function hsToRgb([h, s]: number[]): number[] {
+  const channel = (n: number) => {
+    const k = (n + h / 60) % 6;
+    return Math.round(255 * (1 - (s / 100) * Math.max(0, Math.min(k, 4 - k, 1))));
+  };
+  return [channel(5), channel(3), channel(1)];
 }
 
 function guessClass(entityId: string, classes: string[]): string | undefined {
@@ -86,7 +105,7 @@ export function guessEntity(entityId: string, now = new Date().toISOString()): H
     state = "idle";
   } else if (domain === "climate") {
     state = "heat";
-    Object.assign(attributes, { current_temperature: 20.5, temperature: 21 });
+    Object.assign(attributes, { current_temperature: 20.5, temperature: 21, min_temp: 7, max_temp: 35 });
   }
   return { entity_id: entityId, state, attributes, last_changed: now, last_updated: now };
 }
@@ -139,9 +158,10 @@ export class SimHome {
   get hass(): HomeAssistant {
     return {
       states: this.states,
-      user: { is_admin: true },
+      user: USER,
       callService: (domain, service, data) => this.callService(domain, service, data),
       formatEntityState: formatState,
+      formatEntityAttributeValue: (stateObj, attribute) => `${stateObj.attributes[attribute]} °C`,
     };
   }
 
@@ -175,6 +195,10 @@ export class SimHome {
   }
 
   async callService(domain: string, service: string, data: Record<string, unknown> = {}): Promise<void> {
+    // HA also runs a script when it's called as a service of its own name, like script.goodnight.
+    if (domain === "script" && !["turn_on", "turn_off", "toggle"].includes(service)) {
+      return this.callService(domain, "turn_on", { ...data, entity_id: `script.${service}` });
+    }
     // A target can name several entities, and HA runs the service on each.
     if (Array.isArray(data.entity_id)) {
       for (const entity_id of data.entity_id) await this.callService(domain, service, { ...data, entity_id });
@@ -183,16 +207,38 @@ export class SimHome {
     const id = String(data.entity_id ?? "");
     const stateObj = this.states[id];
     if (!stateObj) throw new Error(id ? `${id} is not in this demo home` : `${domain}.${service} needs an entity_id in this demo`);
+    if (domain === "homeassistant") {
+      const own = domainOf(id);
+      const cover = own === "cover" ? ({ turn_on: "open_cover", turn_off: "close_cover" } as Record<string, string>)[service] : undefined;
+      return this.callService(own, cover ?? service, data);
+    }
     const on = stateObj.state === "on";
     const { entity_id: _, brightness_pct, transition: __, ...attrs } = data;
     if (TOGGLES.has(domain) && ["toggle", "turn_on", "turn_off"].includes(service)) {
-      const next = service === "toggle" ? !on : service === "turn_on";
       if (brightness_pct != null) attrs.brightness = Math.round(Number(brightness_pct) * 2.55);
+      // HA turns a light off when it's asked for brightness 0.
+      const next = service === "toggle" ? !on : service === "turn_on" && (attrs.brightness == null || Number(attrs.brightness) > 0);
+      if (!next) {
+        this.set(id, "off", domain === "light" && on ? this.dim({ ...stateObj, attributes: { ...stateObj.attributes } }) : {});
+        return;
+      }
+      if (Array.isArray(attrs.hs_color)) attrs.rgb_color = hsToRgb(attrs.hs_color.map(Number));
       if (attrs.rgb_color) Object.assign(attrs, { color_mode: "hs", color_temp_kelvin: null });
       if (attrs.color_temp_kelvin) Object.assign(attrs, { ...WARM_WHITE, color_temp_kelvin: attrs.color_temp_kelvin });
-      if (domain === "light" && next && !on) Object.assign(attrs, { brightness: 255, ...this.lastLook[id], ...attrs });
-      if (domain === "light" && !next && on) Object.assign(attrs, this.dim({ ...stateObj, attributes: { ...stateObj.attributes } }));
-      this.set(id, next ? "on" : "off", attrs);
+      if (domain === "light" && !on) Object.assign(attrs, { brightness: 255, ...this.lastLook[id], ...attrs });
+      this.set(id, "on", attrs);
+    } else if (domain === "media_player" && MEDIA.has(service)) {
+      this.set(id, MEDIA.get(service)!(stateObj.state));
+    } else if (domain === "climate" && service === "set_temperature") {
+      const { min_temp, max_temp } = stateObj.attributes as { min_temp: number; max_temp: number };
+      const target = Number(data.temperature);
+      if (!(target >= min_temp && target <= max_temp)) {
+        throw new Error(`Provided temperature ${data.temperature} is not valid. Accepted range is ${min_temp} to ${max_temp}.`);
+      }
+      this.set(id, stateObj.state, { temperature: target });
+    } else if (domain === "climate" && ["turn_on", "turn_off", "toggle", "set_hvac_mode"].includes(service)) {
+      const heat = service === "turn_on" || (service === "toggle" && stateObj.state === "off");
+      this.set(id, service === "set_hvac_mode" ? String(data.hvac_mode ?? stateObj.state) : heat ? "heat" : "off");
     } else if (domain === "cover" && ["toggle", "open_cover", "close_cover", "stop_cover"].includes(service)) {
       const moving = stateObj.state === "opening" || stateObj.state === "closing";
       if (service === "stop_cover" || (service === "toggle" && moving)) {
@@ -217,10 +263,17 @@ export class SimHome {
     }
   }
 
-  /** Nudges numeric sensors a little, so readings on the pins visibly update the way live ones do. */
+  /** Nudges numeric sensors a little and thermostats toward their target, so pins visibly update the way live ones do. */
   drift(random = Math.random): void {
     let changed = false;
     for (const stateObj of Object.values(this.states)) {
+      const { current_temperature: now, temperature: target } = stateObj.attributes;
+      if (domainOf(stateObj.entity_id) === "climate") {
+        if (stateObj.state === "off" || typeof now !== "number" || typeof target !== "number" || now === target) continue;
+        const next = now + Math.sign(target - now) * Math.min(0.5, Math.abs(target - now));
+        changed = this.write(stateObj.entity_id, stateObj.state, { current_temperature: next }) || changed;
+        continue;
+      }
       const step = SENSOR_CLASSES[String(stateObj.attributes.device_class)]?.step;
       const value = Number(stateObj.state);
       if (!step || !Number.isFinite(value)) continue;

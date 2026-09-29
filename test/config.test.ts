@@ -78,9 +78,10 @@ describe("parseConfig", () => {
     ],
     [{ ...base, pins: [{ entity: "sensor.t", anchor: [0, 0, 1], name: ["a"] }] }, 'pins[0].name must be text, got ["a"]'],
     [{ ...base, pins: [{ entity: "sensor.t", anchor: [0, 0, 1], icon: "lamp" }] }, "pins[0].icon must be an icon like mdi:lamp"],
-    [{ ...base, pins: [{ entity: "sensor.t", anchor: [0, 0, 1], nmae: "T" }] }, 'Unknown option "pins[0].nmae"'],
-    [{ ...base, lights: [{ entity: "light.a", anchor: [0, 0, 0], raduis: 2 }] }, 'Unknown option "lights[0].raduis"'],
-    [{ ...base, light: [] }, 'Unknown option "light"'],
+    [{ ...base, pins: [{ entity: "sensor.t", anchor: [0, 0, 1], nmae: "T" }] }, 'Unknown option "pins[0].nmae". Did you mean "pins[0].name"?'],
+    [{ ...base, lights: [{ entity: "light.a", anchor: [0, 0, 0], raduis: 2 }] }, 'Unknown option "lights[0].raduis". Did you mean "lights[0].radius"?'],
+    [{ ...base, light: [] }, 'Unknown option "light". Did you mean "lights"?'],
+    [{ ...base, Splat: "/a.spz" }, 'Unknown option "Splat". Did you mean "splat"?'],
   ])("rejects %j", (raw, message) => {
     expect(error(raw)).toContain(message);
   });
@@ -100,6 +101,16 @@ describe("parseConfig", () => {
     expect(config.visibility).toHaveLength(1);
   });
 
+  test("an unknown option far from any known one gets no guess", () => {
+    expect(error({ ...base, x: 1 })).toBe('Unknown option "x"');
+    expect(error({ ...base, colour: "red" })).toBe('Unknown option "colour"');
+    expect(error({ ...base, lihgt: [], pinz: [] })).toBe('Unknown option "lihgt", "pinz"');
+  });
+
+  test("HA's disabled flag is kept", () => {
+    expect(parseConfig({ ...base, disabled: true }).disabled).toBe(true);
+  });
+
   test("card_mod styling is kept", () => {
     expect(parseConfig({ ...base, card_mod: { style: "ha-card { border: none; }" } }).card_mod).toBeDefined();
   });
@@ -111,8 +122,8 @@ describe("parseConfig", () => {
     expect([more.up, more.lod, more.camera, more.aspect_ratio]).toEqual([[0, -1, 0], true, undefined, undefined]);
   });
 
-  test("an empty name counts as no name", () => {
-    const config = parseConfig({ ...base, pins: [{ entity: "sensor.t", anchor: [0, 0, 1], name: "" }] });
+  test("an empty name or icon counts as none", () => {
+    const config = parseConfig({ ...base, pins: [{ entity: "sensor.t", anchor: [0, 0, 1], name: "", icon: "" }] });
     expect(config.pins[0]).toEqual({ entity: "sensor.t", anchor: [0, 0, 1] });
   });
 

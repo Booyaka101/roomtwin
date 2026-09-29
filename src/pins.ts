@@ -84,9 +84,11 @@ export function pinLabel(hass: HomeAssistant, stateObj: HassEntity | undefined):
   if (!stateObj) return "";
   const domain = domainOf(stateObj.entity_id);
   if (TOGGLE_DOMAINS.has(domain) || PRESS_SERVICES.has(domain)) return "";
-  if (hass.formatEntityState) return hass.formatEntityState(stateObj);
   const unit = stateObj.attributes.unit_of_measurement;
-  return unit ? `${stateObj.state} ${unit}` : stateObj.state;
+  const state = hass.formatEntityState?.(stateObj) ?? (unit ? `${stateObj.state} ${unit}` : stateObj.state);
+  const current = stateObj.attributes.current_temperature;
+  if (domain !== "climate" || typeof current !== "number") return state;
+  return `${state} · ${hass.formatEntityAttributeValue?.(stateObj, "current_temperature") ?? `${current}°`}`;
 }
 
 /** State read out to screen readers after the pin's name. Scenes and buttons only hold the time they last ran. */
@@ -96,8 +98,18 @@ export function spokenState(hass: HomeAssistant, stateObj: HassEntity | undefine
   return pinLabel(hass, stateObj) || (hass.formatEntityState?.(stateObj) ?? stateObj.state);
 }
 
-const ACTIVE_STATES = new Set([
-  "on", "open", "opening", "closing", "playing", "home", "heat", "cool", "heat_cool", "unlocked", "unlocking", "cleaning", "mowing",
+const ACTIVE_STATES = new Set(["on", "open", "home", "active", "mowing"]);
+// Domains whose states other than these all count as active, as Home Assistant's own stateActive has it.
+const INACTIVE_STATES = new Map([
+  ["alarm_control_panel", ["disarmed"]],
+  ["climate", ["off"]],
+  ["cover", ["closed"]],
+  ["valve", ["closed"]],
+  ["lock", ["locked"]],
+  ["media_player", ["off", "standby"]],
+  ["vacuum", ["idle", "docked", "paused"]],
+  ["person", ["not_home"]],
+  ["device_tracker", ["not_home"]],
 ]);
 const ALERT_STATES = new Set(["jammed", "triggered", "error"]);
 // Binary sensors whose "on" means something to look at: an open door or window, smoke, a leak.
@@ -111,6 +123,8 @@ export function pinState(stateObj: HassEntity | undefined): "missing" | "unavail
   const alert = stateObj.state === "on" && domainOf(stateObj.entity_id) === "binary_sensor";
   if (alert && ALERT_CLASSES.has(String(stateObj.attributes.device_class))) return "alert";
   if (ALERT_STATES.has(stateObj.state)) return "alert";
+  const inactive = INACTIVE_STATES.get(domainOf(stateObj.entity_id));
+  if (inactive) return inactive.includes(stateObj.state) ? "idle" : "active";
   return ACTIVE_STATES.has(stateObj.state) ? "active" : "idle";
 }
 

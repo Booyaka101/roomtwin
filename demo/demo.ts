@@ -137,6 +137,19 @@ function controls(home: SimHome, stateObj: HassEntity, detailed: boolean) {
     const label = opening ? (on ? "Close it" : "Open it") : on ? "Clear" : "Trigger";
     return html`<button @click=${() => home.set(id, on ? "off" : "on")}>${label}</button>`;
   }
+  if (domain === "media_player") {
+    const playing = stateObj.state === "playing";
+    return html`<button class=${playing ? "on" : ""} @click=${() => call(domain, "media_play_pause")}>${playing ? "Pause" : "Play"}</button>`;
+  }
+  if (domain === "climate") {
+    const target = Number(stateObj.attributes.temperature);
+    const nudge = (step: number) => call(domain, "set_temperature", { temperature: target + step });
+    return html`<span class="stepper">
+      <button aria-label="Lower the target" @click=${() => nudge(-0.5)}>-</button>
+      <span aria-live="polite">${target} °C</span>
+      <button aria-label="Raise the target" @click=${() => nudge(0.5)}>+</button>
+    </span>`;
+  }
   if (domain === "scene" || domain === "script") return html`<button @click=${() => call(domain, "turn_on")}>Run</button>`;
   if (domain === "button" || domain === "input_button") return html`<button @click=${() => call(domain, "press")}>Press</button>`;
   return nothing;

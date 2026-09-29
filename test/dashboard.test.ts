@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { SaveError, canSave, dashboardUrlPath, findCard, replaceAt, saveCard } from "../src/dashboard";
+import { SaveError, canSave, dashboardUrlPath, findCard, replaceAt, saveCard, viewPath } from "../src/dashboard";
 import type { HomeAssistant } from "../src/hass";
 
 const card = { type: "custom:roomtwin-card", splat: "/local/roomtwin/living.spz", pins: [{ entity: "sensor.t", anchor: [0, 1, 0] }] };
@@ -73,6 +73,12 @@ test("replaceAt swaps one value and leaves the original alone", () => {
   expect(replaced.views[0]).toBe(sections.views[0]);
 });
 
+test("viewPath", () => {
+  expect(viewPath("/lovelace/0")).toBe("0");
+  expect(viewPath("/room-twin/living")).toBe("living");
+  expect(viewPath("/room-twin")).toBe("");
+});
+
 test("dashboardUrlPath", () => {
   expect(dashboardUrlPath("/lovelace/0")).toBeNull();
   expect(dashboardUrlPath("/lovelace")).toBeNull();
@@ -116,8 +122,18 @@ describe("saveCard", () => {
     expect(await saveError(changed)).toMatch(/^Couldn't find this card in the saved dashboard/);
   });
 
-  test("two identical cards are left alone", async () => {
+  test("two identical cards in one view are left alone", async () => {
     expect(await saveError({ views: [{ cards: [card, card] }] })).toMatch(/more than one card with exactly this config/);
+  });
+
+  test("of identical cards in several views, the one in the view on screen is changed", async () => {
+    const dashboard = { views: [{ path: "phone", cards: [card] }, { cards: [card] }, { path: "tablet", cards: [card] }] };
+    for (const [view, index] of [["tablet", 2], ["1", 1], ["", 0]] as const) {
+      const { hass, calls } = fakeHass(dashboard);
+      await saveCard(hass, null, card, next, view);
+      expect(findCard(calls[1].config, next)).toEqual([["views", index, "cards", 0]]);
+    }
+    expect(await saveError({ views: [{ cards: [] }, { cards: [card] }, { cards: [card] }] })).toMatch(/more than one card/);
   });
 
   test("a rejected save says so", async () => {

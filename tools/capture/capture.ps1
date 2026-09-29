@@ -75,6 +75,10 @@ if ($isVideo) {
   Invoke-Step "Extracting frames at $Fps fps" $Ffmpeg @("-hide_banner", "-loglevel", "error", "-i", $Source, "-vf", $scale, "-q:v", "2", (Join-Path $images "frame_%05d.jpg"))
 } else {
   Get-ChildItem -LiteralPath $Source -File | Where-Object { $_.Extension -match '^\.(jpe?g|png)$' } | Copy-Item -Destination $images
+  $heic = @(Get-ChildItem -LiteralPath $Source -File | Where-Object { $_.Extension -match '^\.hei[cf]$' }).Count
+  if ($heic -gt 0) {
+    Write-Warning "Skipped $heic HEIC photos, which COLMAP can't read. Convert them to JPG, or on an iPhone set Settings > Camera > Formats to Most Compatible before shooting."
+  }
 }
 $frameCount = (Get-ChildItem -LiteralPath $images -File).Count
 if ($frameCount -lt 20) { throw "Only $frameCount images to work with. Use a longer video, a higher -Fps, or more photos (aim for 100 to 300)." }

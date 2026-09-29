@@ -149,6 +149,51 @@ test("scenes and buttons record when they ran, locks lock", async () => {
   expect(sim.states["lock.front"].state).toBe("unlocked");
 });
 
+test("media players play, pause and stop", async () => {
+  const { sim } = home(["media_player.tv"]);
+  await sim.callService("media_player", "media_play_pause", { entity_id: "media_player.tv" });
+  expect(sim.states["media_player.tv"].state).toBe("playing");
+  await sim.callService("media_player", "media_play_pause", { entity_id: "media_player.tv" });
+  expect(sim.states["media_player.tv"].state).toBe("paused");
+  await sim.callService("media_player", "turn_off", { entity_id: "media_player.tv" });
+  expect(sim.states["media_player.tv"].state).toBe("off");
+  await sim.callService("media_player", "toggle", { entity_id: "media_player.tv" });
+  expect(sim.states["media_player.tv"].state).toBe("idle");
+});
+
+test("a thermostat takes a target within its range and changes mode", async () => {
+  const { sim } = home(["climate.lounge"]);
+  await sim.callService("climate", "set_temperature", { entity_id: "climate.lounge", temperature: 22.5 });
+  expect(sim.states["climate.lounge"].attributes.temperature).toBe(22.5);
+  await expect(sim.callService("climate", "set_temperature", { entity_id: "climate.lounge", temperature: 40 })).rejects.toThrow(
+    "Provided temperature 40 is not valid. Accepted range is 7 to 35.",
+  );
+  await sim.callService("climate", "toggle", { entity_id: "climate.lounge" });
+  expect(sim.states["climate.lounge"].state).toBe("off");
+  await sim.callService("climate", "set_hvac_mode", { entity_id: "climate.lounge", hvac_mode: "cool" });
+  expect(sim.states["climate.lounge"].state).toBe("cool");
+});
+
+test("a script runs when called by its own name, and homeassistant services reach the entity's domain", async () => {
+  vi.useFakeTimers();
+  const { sim } = home(["script.goodnight", "cover.blind", "light.lamp"]);
+  await sim.callService("script", "goodnight");
+  expect(sim.states["script.goodnight"].state).toBe("on");
+  await sim.callService("homeassistant", "turn_on", { entity_id: "cover.blind" });
+  expect(sim.states["cover.blind"].state).toBe("opening");
+  await sim.callService("homeassistant", "toggle", { entity_id: "light.lamp" });
+  expect(sim.states["light.lamp"].state).toBe("off");
+  sim.dispose();
+});
+
+test("a light asked for brightness 0 turns off, and hs_color sets its colour", async () => {
+  const { sim } = home(["light.lamp"]);
+  await sim.callService("light", "turn_on", { entity_id: "light.lamp", hs_color: [240, 100] });
+  expect(sim.states["light.lamp"].attributes.rgb_color).toEqual([0, 0, 255]);
+  await sim.callService("light", "turn_on", { entity_id: "light.lamp", brightness_pct: 0 });
+  expect(sim.states["light.lamp"].state).toBe("off");
+});
+
 test("services the demo can't simulate, and unknown entities, reject with a message", async () => {
   const { sim, seen } = home(["light.lamp", "sensor.temp"]);
   await expect(sim.callService("light", "turn_on", { entity_id: "light.gone" })).rejects.toThrow("light.gone is not in this demo home");
@@ -185,6 +230,23 @@ test("drift hands the card one new hass for all the sensors it moved", () => {
   sim.drift(() => 0.9);
   expect(seen).toHaveLength(1);
   expect(seen[0].states["sensor.humidity"].state).toBe("47");
+});
+
+test("drift walks a thermostat's room temperature to its target, unless it's off", async () => {
+  const { sim } = home(["climate.lounge"]);
+  const current = () => sim.states["climate.lounge"].attributes.current_temperature;
+  await sim.callService("climate", "set_temperature", { entity_id: "climate.lounge", temperature: 21.8 });
+  sim.drift();
+  expect(current()).toBe(21);
+  sim.drift();
+  expect(current()).toBe(21.5);
+  sim.drift();
+  sim.drift();
+  expect(current()).toBe(21.8);
+  await sim.callService("climate", "turn_off", { entity_id: "climate.lounge" });
+  await sim.callService("climate", "set_temperature", { entity_id: "climate.lounge", temperature: 19 });
+  sim.drift();
+  expect(current()).toBe(21.8);
 });
 
 test("drift stays within five steps of where a sensor started", () => {

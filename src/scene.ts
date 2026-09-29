@@ -164,7 +164,6 @@ export class RoomScene {
 
   constructor(container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: false });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     this.renderer.setClearColor(0x111111);
     const canvas = this.renderer.domElement;
     canvas.style.display = "block";
@@ -193,10 +192,11 @@ export class RoomScene {
     // OrbitControls fires no "start" for the keyboard. Added first so the pan applies from where the flight left off.
     canvas.addEventListener("keydown", (e) => {
       if (e.key.startsWith("Arrow")) this.flight = null;
-      if (e.key !== "+" && e.key !== "=" && e.key !== "-") return;
+      // Ctrl and minus is the browser's own zoom.
+      if (!["+", "=", "-", "_"].includes(e.key) || e.ctrlKey || e.metaKey || e.altKey) return;
       e.preventDefault();
       this.flight = null;
-      if (e.key === "-") this.controls.dollyOut(KEY_ZOOM);
+      if (e.key === "-" || e.key === "_") this.controls.dollyOut(KEY_ZOOM);
       else this.controls.dollyIn(KEY_ZOOM);
     });
     // Arrow keys pan, so pins outside the saved view can be reached without a pointer.
@@ -277,11 +277,13 @@ export class RoomScene {
     if (!this.ceiling || !this.ceilingSdf) {
       // Inverted plane: the inside (local z > 0) is everything above it, multiplied to alpha 0.
       this.ceilingSdf = new SplatEditSdf({ type: SplatEditSdfType.PLANE, invert: true, opacity: 0 });
-      this.ceiling = new SplatEdit({ rgbaBlendMode: SplatEditRgbaBlendMode.MULTIPLY, softEdge: 0.05 });
+      this.ceiling = new SplatEdit({ rgbaBlendMode: SplatEditRgbaBlendMode.MULTIPLY });
       this.ceiling.name = "roomtwin ceiling cut";
       this.ceiling.add(this.ceilingSdf);
       this.mesh.add(this.ceiling);
     }
+    // Captures aren't always in metres, so the fade scales with the room.
+    this.ceiling.softEdge = this.roomExtent() / 100;
     this.ceilingSdf.position.copy(this.up).multiplyScalar(this.floor + this.ceilingHeight);
     this.ceilingSdf.quaternion.setFromUnitVectors(Z_AXIS, this.up);
   }
@@ -290,6 +292,12 @@ export class RoomScene {
   roomBounds(): THREE.Box3 {
     this.bounds ??= this.measureBounds();
     return this.bounds.clone();
+  }
+
+  /** The room's longest side, or a typical room's when it can't be measured. */
+  private roomExtent(): number {
+    const bounds = this.roomBounds();
+    return bounds.isEmpty() ? 4 : Math.max(...bounds.getSize(new THREE.Vector3()).toArray());
   }
 
   private measureBounds(): THREE.Box3 {
@@ -350,7 +358,7 @@ export class RoomScene {
     const size = bounds.isEmpty() ? new THREE.Vector3(4, 3, 4) : bounds.getSize(new THREE.Vector3());
     const extent = Math.max(size.x, size.y, size.z);
     this.controls.maxDistance = extent * 3;
-    this.controls.minDistance = 0.05;
+    this.controls.minDistance = extent / 100;
     if (view) {
       this.camera.position.fromArray(view.position).applyMatrix4(this.root.matrixWorld);
       this.controls.target.fromArray(view.target).applyMatrix4(this.root.matrixWorld);
@@ -469,10 +477,8 @@ export class RoomScene {
     this.clearHelpers();
     if (anchor) {
       const center = this.captureToWorld(anchor, new THREE.Vector3());
-      const bounds = this.roomBounds();
-      const extent = bounds.isEmpty() ? 4 : Math.max(...bounds.getSize(new THREE.Vector3()).toArray());
       const dot = new THREE.Mesh(
-        new THREE.SphereGeometry(extent / 150, 12, 8),
+        new THREE.SphereGeometry(this.roomExtent() / 150, 12, 8),
         new THREE.MeshBasicMaterial({ color: 0xffc107, depthTest: false }),
       );
       dot.position.copy(center);
@@ -499,6 +505,8 @@ export class RoomScene {
 
   resize(width: number, height: number): void {
     if (width === 0 || height === 0) return;
+    // Browser zoom changes the ratio along with the size.
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();

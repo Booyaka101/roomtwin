@@ -41,10 +41,11 @@ export interface RoomTwinConfig {
   layout_options?: unknown;
   visibility?: unknown;
   card_mod?: unknown;
+  disabled?: unknown;
 }
 
 // Added by the dashboard editor on any card, or by card-mod; kept as-is so emitted YAML doesn't drop them.
-const PASSTHROUGH = ["view_layout", "grid_options", "layout_options", "visibility", "card_mod"] as const;
+const PASSTHROUGH = ["view_layout", "grid_options", "layout_options", "visibility", "card_mod", "disabled"] as const;
 
 // Scaniverse .spz and COLMAP-based .ply captures (Brush, gsplat, Postshot) all load into Spark with Y pointing down.
 export const DEFAULT_UP: Vec3 = [0, -1, 0];
@@ -107,9 +108,26 @@ function unset(value: unknown): value is undefined | null {
   return value === undefined || value === null;
 }
 
+/** Edits between two strings, counting a swap of neighbouring letters as one. */
+function editDistance(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[a.length][b.length];
+}
+
 function checkKeys(value: Record<string, unknown>, known: readonly string[], path: string): void {
   const unknown = Object.keys(value).filter((key) => !known.includes(key));
-  if (unknown.length > 0) throw new ConfigError(`Unknown option ${unknown.map((k) => `"${path}${k}"`).join(", ")}`);
+  if (unknown.length === 0) return;
+  const typo = unknown[0].toLowerCase();
+  const distances = known.map((key) => editDistance(typo, key));
+  const best = Math.min(...distances);
+  const hint = unknown.length === 1 && best <= Math.min(2, typo.length / 3) ? `. Did you mean "${path}${known[distances.indexOf(best)]}"?` : "";
+  throw new ConfigError(`Unknown option ${unknown.map((k) => `"${path}${k}"`).join(", ")}${hint}`);
 }
 
 function vec3(value: unknown, path: string): Vec3 {
@@ -174,7 +192,7 @@ function overrides(value: Record<string, unknown>, path: string): Omit<PinBindin
     }
     result.name = String(value.name);
   }
-  if (!unset(value.icon)) {
+  if (!unset(value.icon) && value.icon !== "") {
     if (typeof value.icon !== "string" || !ICON.test(value.icon)) {
       throw new ConfigError(`${path}.icon must be an icon like mdi:lamp, got ${describe(value.icon)}`);
     }

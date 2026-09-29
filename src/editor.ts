@@ -222,6 +222,7 @@ export class RoomTwinEditor extends LitElement {
     _saving: { state: true },
     _saveError: { state: true },
     _history: { state: true },
+    _future: { state: true },
     _typing: { state: true },
   };
 
@@ -243,6 +244,7 @@ export class RoomTwinEditor extends LitElement {
   private _saving = false;
   private _saveError = "";
   private _history: RoomTwinConfig[] = [];
+  private _future: RoomTwinConfig[] = [];
   /** Text as typed, so a live update can't strip a trailing space or an icon name that isn't finished. */
   private _typing: { for: Selected; key: "name" | "icon"; value: string } | null = null;
   // A slider drag is one step to undo, not one per pixel.
@@ -250,33 +252,52 @@ export class RoomTwinEditor extends LitElement {
   // Sorted when the entity picker opens, not on every state update while it's open.
   private ids: string[] = [];
   // The button that was pressed goes away with its task, so focus moves back into the task.
-  private refocus = false;
+  // Only to its first field when the keyboard pressed it: a phone would pop its keyboard up.
+  private refocus: "" | "task" | "field" = "";
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.addEventListener("keydown", this.onKey);
+    this.addEventListener("keydown", this.handleKey);
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
-    this.removeEventListener("keydown", this.onKey);
+    this.removeEventListener("keydown", this.handleKey);
   }
 
-  private onKey = (e: KeyboardEvent): void => {
-    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.composedPath()[0] as HTMLElement).tagName ?? "");
+  /** The editor's shortcuts. The card forwards keys from a focused pin or the room here too. */
+  handleKey = (e: KeyboardEvent): void => {
+    const target = e.composedPath()[0] as HTMLElement;
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName ?? "");
+    // Sliders and checkboxes have no undo of their own to leave alone.
+    const text = typing && !(target instanceof HTMLInputElement && (target.type === "range" || target.type === "checkbox"));
+    const command = e.ctrlKey || e.metaKey;
+    // Layouts without Latin letters, like Cyrillic, still mean Ctrl+Z by the key where Z would be.
+    const letter = /^[a-z]$/i.test(e.key) ? e.key.toLowerCase() : e.code.replace(/^Key/, "").toLowerCase();
     if (e.key === "Escape" && (this._selected || this._pending || this._floorPoints)) {
       e.preventDefault();
       e.stopPropagation();
       this.endTask();
-    } else if (typing) return;
-    else if (e.key.toLowerCase() === "z" && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+    } else if (command && letter === "s" && this.save) {
+      e.preventDefault();
+      if (this.dirty && !this._saving) void this.onSave();
+    } else if (text) return;
+    else if (command && (letter === "y" || (letter === "z" && e.shiftKey))) {
+      e.preventDefault();
+      this.redo();
+    } else if (command && letter === "z") {
       e.preventDefault();
       this.undo();
-    } else if ((e.key === "Delete" || e.key === "Backspace") && this._selected) {
+    } else if ((e.key === "Delete" || e.key === "Backspace") && this._selected && !typing) {
       e.preventDefault();
       this.removeSelected();
     }
   };
+
+  /** Moves the keyboard into the panel, for when it opens. */
+  focusTask(): void {
+    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>(".task")?.focus({ preventScroll: true }));
+  }
 
   /** A tap on the splat landed on `point` (capture coordinates), or on nothing solid when null. */
   handlePick(point: Vec3 | null): void {
@@ -331,16 +352,16 @@ export class RoomTwinEditor extends LitElement {
   /** Clears the task from one of its own buttons or a key, keeping the keyboard in the panel. */
   private endTask(): void {
     this.clearTask();
-    this.refocus = true;
+    this.refocus = "task";
   }
 
   protected updated(changed: PropertyValues): void {
     if (changed.has("_pending") && this._pending) this.renderRoot.querySelector<HTMLInputElement>("input.entity")?.focus();
     else if (this.refocus) {
       const task = this.renderRoot.querySelector<HTMLElement>(".task");
-      (task?.querySelector<HTMLElement>("input") ?? task)?.focus();
+      ((this.refocus === "field" && task?.querySelector<HTMLElement>("input")) || task)?.focus();
     }
-    this.refocus = false;
+    this.refocus = "";
     if (changed.has("_selected") || changed.has("_pending") || changed.has("config")) {
       this.dispatchEvent(new CustomEvent<HelperDetail>("helper-changed", { detail: this.helper() }));
     }
@@ -368,6 +389,7 @@ export class RoomTwinEditor extends LitElement {
 
   private commit(config: RoomTwinConfig, drag = ""): void {
     if (!drag || drag !== this.dragging) this._history = [...this.steps(), this.config];
+    this._future = [];
     this.dragging = drag;
     this.show(config);
   }
@@ -382,11 +404,25 @@ export class RoomTwinEditor extends LitElement {
     const steps = this.steps();
     const previous = steps[steps.length - 1];
     if (!previous) return;
-    const selected = this.selectedBinding()?.entity;
     this._history = steps.slice(0, -1);
+    this._future = [...this._future, this.config];
+    this.restore(previous);
+  }
+
+  private redo(): void {
+    const next = this._future[this._future.length - 1];
+    if (!next) return;
+    this._history = [...this.steps(), this.config];
+    this._future = this._future.slice(0, -1);
+    this.restore(next);
+  }
+
+  private restore(config: RoomTwinConfig): void {
+    const selected = this.selectedBinding()?.entity;
     this.dragging = "";
     this._typing = null;
-    this.show(previous);
+    this._message = "";
+    this.show(config);
     // Undoing a removal shifts the indexes, so keep the selection only if it still points at the same entity.
     if (this.selectedBinding()?.entity !== selected) this._selected = null;
   }
@@ -402,7 +438,7 @@ export class RoomTwinEditor extends LitElement {
     this.dispatchEvent(new CustomEvent<RoomTwinConfig>("draft-changed", { detail: config }));
   }
 
-  private add(kind: "light" | "pin"): void {
+  private add(kind: "light" | "pin", e: MouseEvent): void {
     if (!this._pending) return;
     const entity = this._entity.trim();
     const anchor = this._pending;
@@ -419,7 +455,7 @@ export class RoomTwinEditor extends LitElement {
     this._pending = null;
     this._entity = "";
     this._message = "";
-    this.refocus = true;
+    this.refocus = e.detail === 0 ? "field" : "task";
   }
 
   private removeSelected(): void {
@@ -457,7 +493,9 @@ export class RoomTwinEditor extends LitElement {
     this.clearTask();
     this._copied = "";
     this._saveError = "";
-    this._history = [];
+    // The card puts the saved config back, which makes this one more step to undo.
+    this._history = [...this.steps(), this.config];
+    this._future = [];
     this.dispatchEvent(new CustomEvent("draft-discarded"));
   }
 
@@ -473,7 +511,7 @@ export class RoomTwinEditor extends LitElement {
       <span>${label}</span>
       <input
         type="range"
-        min=${min}
+        min=${Math.min(min, binding[key])}
         max=${Math.max(max, binding[key])}
         step=${step}
         .value=${String(binding[key])}
@@ -509,6 +547,7 @@ export class RoomTwinEditor extends LitElement {
           this.endDrag();
           if (key === "icon" && value && !ICON.test(value)) {
             this._message = `${value} is not an icon name. Icons look like mdi:lamp.`;
+            this.commit(this.withBinding(selected.kind, selected.index, { icon: undefined }));
             return;
           }
           this._typing = null;
@@ -525,6 +564,7 @@ export class RoomTwinEditor extends LitElement {
       const entity = this._entity.trim();
       const valid = ENTITY_ID.test(entity);
       const known = valid && entity in this.hass.states;
+      const placed = new Set(bindingRefs(this.config).map((b) => b.entity));
       return html`<p>New point at [${this._pending.join(", ")}]. Which entity goes here?</p>
         <input
           class="entity"
@@ -538,7 +578,10 @@ export class RoomTwinEditor extends LitElement {
           @input=${(e: Event) => (this._entity = (e.target as HTMLInputElement).value)}
         />
         <datalist id="entities">
-          ${this.ids.map((id) => html`<option value=${id}>${this.hass.states[id]?.attributes.friendly_name ?? ""}</option>`)}
+          ${this.ids.map((id) => {
+            const name = this.hass.states[id]?.attributes.friendly_name ?? "";
+            return html`<option value=${id}>${placed.has(id) ? `${name} (already in this room)`.trimStart() : name}</option>`;
+          })}
         </datalist>
         ${entity && !valid
           ? html`<p class="note">Entity ids look like light.floor_lamp: a domain, a dot, then lowercase letters, digits and underscores.</p>`
@@ -546,8 +589,8 @@ export class RoomTwinEditor extends LitElement {
             ? html`<p class="note">${entity} is not in Home Assistant right now. It will show as a grey pin.</p>`
             : nothing}
         <div class="row">
-          <button ?disabled=${!valid || !LIGHT_DOMAINS.has(domainOf(entity))} @click=${() => this.add("light")}>Add as light</button>
-          <button ?disabled=${!valid} @click=${() => this.add("pin")}>Add as pin</button>
+          <button ?disabled=${!valid || !LIGHT_DOMAINS.has(domainOf(entity))} @click=${(e: MouseEvent) => this.add("light", e)}>Add as light</button>
+          <button ?disabled=${!valid} @click=${(e: MouseEvent) => this.add("pin", e)}>Add as pin</button>
           <button @click=${this.endTask}>Cancel</button>
         </div>`;
     }
@@ -616,7 +659,7 @@ export class RoomTwinEditor extends LitElement {
             this.commit({ ...this.config, ceiling_cut: (e.target as HTMLInputElement).checked ? suggestedCut : undefined })} /> Ceiling cut</label>
           <input
             type="range"
-            min=${step * 10}
+            min=${Math.min(step * 10, cut ?? Infinity)}
             max=${Math.max(cutMax, cut ?? 0)}
             step=${step}
             ?disabled=${cut === undefined}
@@ -642,10 +685,12 @@ export class RoomTwinEditor extends LitElement {
           : nothing}
         <button class=${this.save ? "" : "primary"} @click=${this.copy}>Copy YAML</button>
         <button ?disabled=${!this.steps().length} @click=${this.undo}>Undo</button>
-        <button @click=${this.discard}>Discard changes</button>
+        <button ?disabled=${!this._future.length} @click=${this.redo}>Redo</button>
+        <button ?disabled=${!this.dirty} @click=${this.discard}>Discard changes</button>
         <button @click=${this.close}>Close</button>
       </section>
       ${this.footerNote()}
+      <p class="note keys">Keys: Esc lets go, Delete removes, Ctrl+Z undoes, Ctrl+Y redoes${this.save ? ", Ctrl+S saves" : ""}.</p>
       <details ?open=${this._copied === "failed"}>
         <summary>${this._copied === "failed" ? "Couldn't reach the clipboard. Select and copy this:" : "YAML"}</summary>
         <textarea readonly rows="10" .value=${yamlOf(this.config)}></textarea>
@@ -693,6 +738,11 @@ export class RoomTwinEditor extends LitElement {
     }
     .note:empty {
       margin: 0;
+    }
+    @media (hover: none) {
+      .keys {
+        display: none;
+      }
     }
     .note.error {
       color: var(--error-color, #db4437);

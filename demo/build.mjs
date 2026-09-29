@@ -21,7 +21,6 @@ const { values: args } = parseArgs({
     port: { type: "string", default: "4173" },
   },
 });
-const SPLAT_EXTENSIONS = ["spz", "ply", "splat", "ksplat", "sog", "rad"];
 const port = Number(args.port);
 
 function fail(message) {
@@ -39,6 +38,14 @@ function readYaml(path, what) {
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) fail(`--port must be a number from 1 to 65535, got ${args.port}.`);
 
+const typescriptOptions = { tsconfig: join(root, "tsconfig.json"), include: ["demo/**/*.ts", "src/**/*.ts"], noEmitOnError: true };
+
+// The card's own config parser, so a typo in the YAML fails the build instead of the published page.
+const parser = await rollup({ input: join(root, "src", "config.ts"), plugins: [typescript(typescriptOptions)] });
+const { output: [parserChunk] } = await parser.generate({ format: "es" });
+await parser.close();
+const { parseConfig, SPLAT_EXTENSIONS } = await import(`data:text/javascript;base64,${Buffer.from(parserChunk.code).toString("base64")}`);
+
 const card = join(root, "dist", "roomtwin-card.js");
 if (!existsSync(card)) fail("dist/roomtwin-card.js is missing. Run npm run build first, or use npm run demo.");
 
@@ -48,16 +55,19 @@ if (!existsSync(configPath)) {
 }
 const config = readYaml(configPath, "The card config");
 if (typeof config !== "object" || Array.isArray(config)) fail(`${args.config} must be the card's YAML mapping.`);
-for (const key of ["lights", "pins"]) {
-  if (config[key] != null && !Array.isArray(config[key])) fail(`${key} in ${args.config} must be a list.`);
-}
 
 const splat = args.splat
   ? resolve(root, args.splat)
   : SPLAT_EXTENSIONS.map((ext) => join(root, "demo", `room.${ext}`)).find((path) => existsSync(path));
-if (!splat || !existsSync(splat)) fail(`No scan found. Put it at demo/room.spz or pass --splat <file>.`);
+if (args.splat && !existsSync(splat)) fail(`${args.splat} doesn't exist.`);
+if (!splat) fail(`No scan found. Put it at demo/room.spz or pass --splat <file>.`);
 const splatExt = extname(splat).slice(1).toLowerCase();
 if (!SPLAT_EXTENSIONS.includes(splatExt)) fail(`${splat} must end in ${SPLAT_EXTENSIONS.map((e) => "." + e).join(", ")}.`);
+try {
+  parseConfig({ ...config, splat: `room.${splatExt}` });
+} catch (err) {
+  fail(`${args.config}: ${err.message}`);
+}
 const splatMb = statSync(splat).size / 1e6;
 if (splatMb > 100) fail(`${splat} is ${splatMb.toFixed(0)} MB. GitHub refuses files over 100 MB; export an .spz instead.`);
 if (splatMb > 50) console.warn(`demo: ${splat} is ${splatMb.toFixed(0)} MB, which visitors on mobile will wait for. An .spz is usually 5 to 10 times smaller.`);
@@ -88,7 +98,7 @@ const bundle = await rollup({
   input: join(root, "demo", "demo.ts"),
   plugins: [
     resolvePlugin({ browser: true }),
-    typescript({ tsconfig: join(root, "tsconfig.json"), include: ["demo/**/*.ts", "src/**/*.ts"], noEmitOnError: true }),
+    typescript(typescriptOptions),
   ],
   onwarn(warning, warn) {
     if (warning.code !== "CIRCULAR_DEPENDENCY") warn(warning);

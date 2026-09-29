@@ -49,7 +49,7 @@ Copy it to /config/www/roomtwin/ on Home Assistant and point the card at /local/
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
-| `-Source` | required | A video file, or a folder of `.jpg`/`.png` photos. |
+| `-Source` | required | A video file, or a folder of `.jpg`/`.png` photos. iPhone HEIC photos are skipped with a warning, so convert them first. |
 | `-Name` | file name of the source | Name of the output file and work folder. |
 | `-WorkDir` | `.\roomtwin-capture\<Name>` | Where everything goes. It must not exist yet. |
 | `-Fps` | `2` | Frames taken per second of video. Aim for 150 to 300 frames in total. |

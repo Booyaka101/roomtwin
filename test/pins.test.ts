@@ -70,6 +70,37 @@ test("pinState", () => {
   expect(pinState(entity("vacuum.robot", "cleaning"))).toBe("active");
 });
 
+test.each([
+  ["climate.lounge", "auto", "active"],
+  ["climate.lounge", "fan_only", "active"],
+  ["climate.lounge", "off", "idle"],
+  ["alarm_control_panel.home", "armed_away", "active"],
+  ["alarm_control_panel.home", "disarmed", "idle"],
+  ["timer.oven", "active", "active"],
+  ["timer.oven", "paused", "idle"],
+  ["vacuum.robot", "returning", "active"],
+  ["vacuum.robot", "docked", "idle"],
+  ["media_player.tv", "paused", "active"],
+  ["media_player.tv", "standby", "idle"],
+  ["cover.blind", "opening", "active"],
+  ["cover.blind", "closed", "idle"],
+  ["valve.garden", "open", "active"],
+  ["lock.front", "open", "active"],
+  ["person.sam", "Work", "active"],
+  ["person.sam", "not_home", "idle"],
+  ["sensor.t", "21.5", "idle"],
+])("%s at %s is %s, as in Home Assistant", (id, state, expected) => {
+  expect(pinState(entity(id, state))).toBe(expected);
+});
+
+test("a thermostat shows its mode and the room's temperature", () => {
+  const climate = entity("climate.lounge", "heat", { current_temperature: 20.5 });
+  expect(pinLabel(hass, climate)).toBe("heat · 20.5°");
+  const formatted = { ...hass, formatEntityState: () => "Heat", formatEntityAttributeValue: () => "20.5 °C" };
+  expect(pinLabel(formatted, climate)).toBe("Heat · 20.5 °C");
+  expect(pinLabel(formatted, entity("climate.lounge", "unavailable"))).toBe("Heat");
+});
+
 describe("activeColor", () => {
   test("follows the theme's state colours, most specific first", () => {
     expect(activeColor(entity("cover.blind", "open", { device_class: "blind" }))).toBe(

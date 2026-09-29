@@ -7,7 +7,7 @@ One card shows one room. The idea is one card per Home Assistant area.
 ## What you need
 
 - Home Assistant 2024.11 or newer.
-- A browser with WebGL2: current Chrome, Edge, Firefox or Safari, including the Home Assistant companion apps. A mid-range Android tablet is enough.
+- A browser with WebGL2: current Chrome, Edge, Firefox or Safari, including the Home Assistant companion apps.
 - A splat of your room as `.spz` (best) or `.ply`. The next section covers making one.
 
 ## 1. Capture the room
@@ -87,9 +87,9 @@ Admins see a pencil button in the corner. It opens edit mode, which works on the
 4. Optionally turn on **Ceiling cut** so you can see into the room from above, and press **Use this view as default** once the camera is where you like it.
 5. Press **Save**. The card writes its new config into the dashboard, leaving everything else on it as it was, and Home Assistant redraws the dashboard with it.
 
-Nothing is saved until step 5. The editor says so while you have unsaved changes, and after **Close** the pencil wears a dot until you save or discard them. **Undo** steps back one change at a time (a whole slider drag counts as one, and so does typing in one field), and **Discard changes** puts everything back. Closing and reopening the editor keeps the undo history.
+Nothing is saved until step 5. The editor says so while you have unsaved changes, and after **Close** the pencil wears a dot until you save or discard them. **Undo** steps back one change at a time (a whole slider drag counts as one, and so does typing in one field), **Redo** steps forward again, and **Discard changes** puts everything back, as one more step you can undo. Closing and reopening the editor keeps the undo history.
 
-From the keyboard, Esc lets go of the selected light or pin (or cancels placing one), Ctrl+Z undoes, and Delete removes the selected one. Inside a text field those keys do their usual thing.
+From the keyboard, Esc lets go of the selected light or pin (or cancels placing one), Delete removes it, Ctrl+Z undoes, Ctrl+Y or Ctrl+Shift+Z redoes and Ctrl+S saves. These work with a pin or the room focused too, and Delete on a focused pin removes that pin. Inside a text field, Ctrl+Z and Delete do their usual thing.
 
 Save needs a dashboard managed from the UI. A YAML-mode dashboard only changes in its file, so there the editor has **Copy YAML** instead: paste the result over the card's entry in the dashboard's YAML file. If a save fails for another reason, the editor says why, and **Copy YAML** into the card's code editor does the same job. Save is also hidden while the dashboard itself is in edit mode, where the card is only a preview. Home Assistant redraws the dashboard whenever anyone saves it, so changes you haven't saved yet are lost if someone saves the same dashboard from another tab.
 

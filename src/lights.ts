@@ -75,7 +75,8 @@ export class LightRig {
     bindings.forEach((binding, i) => {
       const { edit, sdf } = this.edits[i];
       edit.name = `roomtwin ${binding.entity}`;
-      edit.softEdge = binding.soft_edge;
+      // The fade is centred on the surface, so any wider and even the middle of the sphere stops taking the full colour.
+      edit.softEdge = Math.min(binding.soft_edge, 2 * binding.radius);
       sdf.radius = binding.radius;
       sdf.position.fromArray(binding.anchor);
     });

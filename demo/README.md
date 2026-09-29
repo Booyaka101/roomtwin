@@ -11,11 +11,11 @@ The scan becomes public the moment you push it, and anyone can download the file
 
 ## Simulated devices
 
-Every entity in the config gets a believable state from its id: `light.*`, `switch.*`, `fan.*` and `input_boolean.*` toggle, covers open and close, locks lock, scenes and scripts run, buttons press. Sensors are guessed from words in the id (`temperature` or `temp`, `humidity`, `power`, `energy`, `illuminance` or `lux`, `battery`, `co2`). Temperature, humidity, power, light level and CO2 drift a little every few seconds; energy and battery hold still. Binary sensors named with `door`, `window`, `garage`, `gate`, `motion`, `occupancy`, `moisture` or `smoke` get that device class, so a door pin turns red when it's opened from the side panel. Covers named with `blind`, `curtain` or `shade` get that class and its icon too. Motion and occupancy sensors see someone every minute or so and clear 20 seconds later.
+Every entity in the config gets a believable state from its id: `light.*`, `switch.*`, `fan.*` and `input_boolean.*` toggle, covers open and close, locks lock, scenes and scripts run, buttons press, media players play and pause, and a `climate.*` thermostat heats to a target you can raise and lower. The side panel has a button or two for each of these. A `tap_action` that calls a service works as long as it's one of those, including `homeassistant.turn_on` and friends and a script called by its own name, like `script.goodnight`. Sensors are guessed from words in the id (`temperature` or `temp`, `humidity`, `power`, `energy`, `illuminance` or `lux`, `battery`, `co2`). Temperature, humidity, power, light level and CO2 drift a little every few seconds; energy and battery hold still. Binary sensors named with `door`, `window`, `garage`, `gate`, `motion`, `occupancy`, `moisture` or `smoke` get that device class, so a door pin turns red when it's opened from the side panel. Covers named with `blind`, `curtain` or `shade` get that class and its icon too. Motion and occupancy sensors see someone every minute or so and clear 20 seconds later.
 
-An `icon` the page can't draw (anything that isn't `mdi:`, or a name missing from `@mdi/js`) gets a warning at build time, and its pin shows the entity's usual icon instead. The page also shows the card's YAML under the room, as you wrote it.
+An `icon` the page can't draw (anything that isn't `mdi:`, or a name missing from `@mdi/js`) gets a warning at build time, and its pin shows the entity's usual icon instead. The page also shows `room.yaml` under the room as you wrote it, entity ids, comments and all, so treat everything in it as public.
 
-To change a name or a starting state, add `demo/states.yaml`:
+To change a name or a starting state, add `demo/states.yaml`. An entity listed there but not in the card still shows up in the side panel, which is handy for a scene or script that a pin's `tap_action` runs:
 
 ```yaml
 light.ceiling_lights:

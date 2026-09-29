@@ -81,6 +81,12 @@ describe("LightRig", () => {
     expect((parent.children[0] as SplatEdit).softEdge).toBe(0.4);
   });
 
+  test("a soft edge wider than the sphere is narrowed so its middle still takes the full colour", () => {
+    const parent = new THREE.Object3D();
+    new LightRig(parent).setBindings([{ ...binding("light.a", 0), radius: 0.2, soft_edge: 1 }]);
+    expect((parent.children[0] as SplatEdit).softEdge).toBe(0.4);
+  });
+
   test("applyStates recolours and reports whether anything changed", () => {
     const parent = new THREE.Object3D();
     const rig = new LightRig(parent);

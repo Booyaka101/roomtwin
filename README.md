@@ -2,6 +2,10 @@
 
 A Home Assistant dashboard card that shows a Gaussian splat of your actual room and puts your devices where they really are. Tap the lamp in the 3D view and the lamp turns on, and that part of the room brightens with it. Sensors float in place with their live readings.
 
+![Tapping the stairs light in a scanned playroom turns it off and the stairwell goes dark, then the room turns in 3D](https://raw.githubusercontent.com/Booyaka101/roomtwin/main/docs/tap-the-lamp.gif)
+
+**[Try the live demo](https://booyaka101.github.io/roomtwin/)**, the real card in your browser with a pretend home behind it.
+
 One card shows one room. The idea is one card per Home Assistant area.
 
 ## What you need
@@ -233,10 +237,10 @@ npm run build     # writes dist/roomtwin-card.js
 
 The card uses Lit, three.js and [Spark](https://sparkjs.dev) 2.2.0, bundled by Rollup into one file.
 
-`npm run demo -- --serve` builds the live demo, the card on a real room with a simulated home around it, and serves it at http://localhost:4173. It needs a scan and the card's YAML in `demo/`; [demo/README.md](demo/README.md) covers that and publishing it on GitHub Pages.
+`npm run demo -- --serve` builds the live demo, the card on a real room with a simulated home around it, and serves it at http://localhost:4173. It uses the scan and the card's YAML in `demo/`; [demo/README.md](demo/README.md) covers swapping in your own room and publishing it on GitHub Pages.
 
-To release, run `npm version <version> --no-git-tag-version` (it updates `package.json` and `package-lock.json`), set the same version in `src/version.ts` (a test keeps them equal), add a `## <version>` section to `CHANGELOG.md`, commit, and push a tag `v<version>`. The release workflow checks the tag matches `package.json`, typechecks, tests and builds the card, creates the GitHub release with those notes and `roomtwin-card.js` attached, then runs the HACS check. HACS installs from the release asset. The HACS check fails unless the README shows at least one image (a screenshot or GIF of the card, not just badges), so add one before the first tag.
+To release, run `npm version <version> --no-git-tag-version` (it updates `package.json` and `package-lock.json`), set the same version in `src/version.ts` (a test keeps them equal), add a `## <version>` section to `CHANGELOG.md`, commit, and push a tag `v<version>`. The release workflow checks the tag matches `package.json`, typechecks, tests and builds the card, creates the GitHub release with those notes and `roomtwin-card.js` attached, then runs the HACS check. HACS installs from the release asset. The HACS check fails unless the README shows at least one image (a screenshot or GIF of the card, not just badges), so keep the GIF at the top.
 
 ## License
 
-MIT
+MIT, for the code. The demo scan in `demo/room.spz` isn't covered by that: it's the Playroom from the [Deep Blending](http://visual.cs.ucl.ac.uk/pubs/deepblending/) dataset by Peter Hedman, Julien Philip, True Price, Jan-Michael Frahm, George Drettakis and Gabriel Brostow (SIGGRAPH Asia 2018), trained into a splat with Brush.

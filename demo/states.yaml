@@ -1,0 +1,10 @@
+light.stairs_light:
+  attributes: { friendly_name: Stairs light }
+cover.playroom_blind:
+  attributes: { friendly_name: Window blind, device_class: shade }
+scene.bedtime:
+  attributes: { friendly_name: Bedtime }
+media_player.kids_radio:
+  attributes: { friendly_name: Kids radio }
+sensor.playroom_temperature:
+  attributes: { friendly_name: Thermostat }

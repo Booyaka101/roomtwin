@@ -1,0 +1,29 @@
+# The Playroom from the Deep Blending dataset (Hedman et al., SIGGRAPH Asia 2018), trained into a splat with Brush.
+# The devices are made up and pinned on the objects they stand for.
+type: custom:roomtwin-card
+splat: room.spz
+up: [0.115, -0.9921, -0.0505]
+floor: -4.7093
+camera:
+  position: [-4.3, -1.1, 3.9]
+  target: [-0.2, 0.5, -0.6]
+lights:
+  - entity: light.stairs_light
+    anchor: [-0.72, -1.02, -4.34]
+    radius: 4
+    soft_edge: 1
+    off_dim: 0.4
+pins:
+  - entity: binary_sensor.playroom_door
+    anchor: [1.703, 3.079, -3.897]
+  - entity: scene.bedtime
+    anchor: [0.906, 2.048, -4.394]
+  - entity: sensor.playroom_temperature
+    anchor: [-6.262, 1.189, -2.167]
+  - entity: cover.playroom_blind
+    anchor: [4.327, -0.451, 2.341]
+  - entity: media_player.kids_radio
+    anchor: [3.72, 1.87, 0.96]
+    icon: mdi:radio
+  - entity: sensor.computer_power
+    anchor: [0.079, -2.052, 4.014]

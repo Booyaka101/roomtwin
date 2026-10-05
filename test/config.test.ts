@@ -24,6 +24,7 @@ describe("parseConfig", () => {
       floor: 0,
       lod: true,
       lod_scale: 1,
+      occlude_pins: false,
       lights: [],
       pins: [],
     });
@@ -53,6 +54,7 @@ describe("parseConfig", () => {
     [{ ...base, aspect_ratio: Number.POSITIVE_INFINITY }, "aspect_ratio must look like"],
     [{ ...base, camera: { position: [0, 1, 2], target: [0, 0, 0], fov: 50 } }, 'Unknown option "camera.fov"'],
     [{ ...base, lod: "yes" }, 'lod must be true or false, got "yes"'],
+    [{ ...base, occlude_pins: "no" }, 'occlude_pins must be true or false, got "no"'],
     [{ ...base, lod_scale: 20 }, "lod_scale must be at most 8, got 20"],
     [{ ...base, ceiling_cut: -1 }, "ceiling_cut must be at least 0, got -1"],
     [{ ...base, ceiling_cut: "2.3" }, 'ceiling_cut must be a number, got "2.3"'],
@@ -60,6 +62,8 @@ describe("parseConfig", () => {
     [{ ...base, aspect_ratio: 969 }, 'aspect_ratio 969 is how YAML reads an unquoted 16:9. Put it in quotes: "16:9"'],
     [{ ...base, aspect_ratio: 40 }, "aspect_ratio must look like"],
     [{ ...base, camera: { position: [0, 1, 2] } }, "camera.target must be a list of three numbers"],
+    [{ ...base, camera: { position: [1, 2, 3], target: [1, 2, 3] } }, "camera.position and camera.target are the same point"],
+    [{ ...base, camera: { position: [1, 2, 3.00004], target: [1, 2, 3] } }, "camera.position and camera.target are the same point"],
     [{ ...base, lights: { entity: "light.a" } }, "lights must be a list"],
     [{ ...base, lights: ["light.a"] }, 'lights[0] must be a mapping with entity and anchor, got "light.a"'],
     [
@@ -72,6 +76,14 @@ describe("parseConfig", () => {
     ],
     [{ ...base, lights: [{ entity: "light.a", anchor: [0, 0, 0], off_dim: 1.5 }] }, "lights[0].off_dim must be at most 1, got 1.5"],
     [{ ...base, lights: [{ entity: "light.a", anchor: [0, 0, 0], radius: 0 }] }, "lights[0].radius must be at least 0.01, got 0"],
+    [
+      { ...base, lights: [{ entity: "light.a", anchor: [1, 2, 3], end: [1, 2] }] },
+      "lights[0].end must be a list of three numbers",
+    ],
+    [
+      { ...base, lights: [{ entity: "light.a", anchor: [1, 2, 3], end: [1, 2, 3] }] },
+      "lights[0].end must be a different point from lights[0].anchor",
+    ],
     [
       { ...base, pins: [{ entity: "sensor.t", anchor: [0, 0, "1"] }] },
       'pins[0].anchor must be a list of three numbers like [0, 1.2, -0.5], got [0,0,"1"]',
@@ -116,10 +128,22 @@ describe("parseConfig", () => {
   });
 
   test("an option left empty in YAML falls back to its default", () => {
-    const config = parseConfig({ ...base, floor: null, lod_scale: null, ceiling_cut: null });
-    expect([config.floor, config.lod_scale, config.ceiling_cut]).toEqual([0, 1, undefined]);
+    const config = parseConfig({ ...base, floor: null, lod_scale: null, ceiling_cut: null, occlude_pins: null });
+    expect([config.floor, config.lod_scale, config.ceiling_cut, config.occlude_pins]).toEqual([0, 1, undefined, false]);
     const more = parseConfig({ ...base, up: null, lod: null, camera: null, aspect_ratio: null });
     expect([more.up, more.lod, more.camera, more.aspect_ratio]).toEqual([[0, -1, 0], true, undefined, undefined]);
+  });
+
+  test("a light stretches to an end point, and occlude_pins turns on", () => {
+    const config = parseConfig({
+      ...base,
+      occlude_pins: true,
+      lights: [{ entity: "light.stairs", anchor: [1, 2, 3], end: [1, -2, 3], radius: 0.8, soft_edge: 0.4, off_dim: 0.4 }],
+    });
+    expect(config.occlude_pins).toBe(true);
+    expect(config.lights[0].end).toEqual([1, -2, 3]);
+    // A light with no end reports undefined, not a copy of the anchor.
+    expect(parseConfig({ ...base, lights: [{ entity: "light.a", anchor: [0, 0, 0] }] }).lights[0].end).toBeUndefined();
   });
 
   test("an empty name or icon counts as none", () => {

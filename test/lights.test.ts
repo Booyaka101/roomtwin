@@ -87,6 +87,37 @@ describe("LightRig", () => {
     expect((parent.children[0] as SplatEdit).softEdge).toBe(0.4);
   });
 
+  test("an end point turns the light into a capsule between the two", () => {
+    const parent = new THREE.Object3D();
+    new LightRig(parent).setBindings([{ ...binding("light.a", 0), end: [0, 4, 2] }]);
+    const [sdf] = sdfs(parent);
+    expect(sdf.type).toBe(SplatEditSdfType.CAPSULE);
+    // Spark's SDF takes a segment of full length along local +Y, centred on the shape.
+    expect(sdf.scale.y).toBe(3);
+    expect(sdf.position.toArray()).toEqual([0, 2.5, 2]);
+    expect(sdf.radius).toBe(1.5);
+    // The far end straight up: no rotation away from +Y.
+    expect(sdf.quaternion.angleTo(new THREE.Quaternion())).toBeCloseTo(0, 6);
+    // A capsule across the room rotates +Y onto the direction between the ends.
+    const other = new THREE.Object3D();
+    new LightRig(other).setBindings([{ ...binding("light.a", 0), end: [3, 1, 2] }]);
+    const [across] = sdfs(other);
+    expect(across.quaternion.angleTo(new THREE.Quaternion())).toBeCloseTo(Math.PI / 2, 6);
+    expect(across.position.toArray()).toEqual([1.5, 1, 2]);
+  });
+
+  test("a capsule turns back into a sphere at its anchor when the end is removed", () => {
+    const parent = new THREE.Object3D();
+    const rig = new LightRig(parent);
+    rig.setBindings([{ ...binding("light.a", 0), end: [4, 1, 2] }]);
+    rig.setBindings([binding("light.a", 0)]);
+    const [sdf] = sdfs(parent);
+    expect(sdf.type).toBe(SplatEditSdfType.SPHERE);
+    expect(sdf.position.toArray()).toEqual([0, 1, 2]);
+    expect(sdf.scale.toArray()).toEqual([1, 1, 1]);
+    expect(sdf.quaternion.angleTo(new THREE.Quaternion())).toBeCloseTo(0, 6);
+  });
+
   test("applyStates recolours and reports whether anything changed", () => {
     const parent = new THREE.Object3D();
     const rig = new LightRig(parent);

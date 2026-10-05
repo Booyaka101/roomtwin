@@ -127,7 +127,7 @@ function yamlLines(value: unknown, indent: string): string[] {
 
 /** The card config as the dashboard should store it, leaving out options that are at their default. */
 export function toCardConfig(config: RoomTwinConfig): Record<string, unknown> {
-  const { type, splat, up, floor, ceiling_cut, aspect_ratio, lod, lod_scale, camera, lights, pins, ...rest } = config;
+  const { type, splat, up, floor, ceiling_cut, aspect_ratio, lod, lod_scale, occlude_pins, camera, lights, pins, ...rest } = config;
   // Only the card's own numbers pick up float noise from sliders and taps. Actions and other cards' options stay exact.
   const point = (v: Vec3) => v.map((n) => round(n));
   const ordered = {
@@ -139,9 +139,10 @@ export function toCardConfig(config: RoomTwinConfig): Record<string, unknown> {
     aspect_ratio,
     lod: lod ? undefined : false,
     lod_scale: lod_scale === 1 ? undefined : round(lod_scale),
+    occlude_pins: occlude_pins ? true : undefined,
     camera: camera && { position: point(camera.position), target: point(camera.target) },
     lights: lights.length
-      ? lights.map((b) => ({ ...b, anchor: point(b.anchor), radius: round(b.radius), soft_edge: round(b.soft_edge), off_dim: round(b.off_dim) }))
+      ? lights.map((b) => ({ ...b, anchor: point(b.anchor), end: b.end ? point(b.end) : undefined, radius: round(b.radius), soft_edge: round(b.soft_edge), off_dim: round(b.off_dim) }))
       : undefined,
     pins: pins.length ? pins.map((b) => ({ ...b, anchor: point(b.anchor) })) : undefined,
     ...rest,
@@ -218,6 +219,8 @@ export function followSelection(selected: Selected | null, before: RoomTwinConfi
 export interface HelperDetail {
   anchor: Vec3 | null;
   radius: number;
+  /** The far end of a capsule light, when it has one. */
+  end?: Vec3 | null;
   selected: Selected | null;
 }
 
@@ -236,6 +239,7 @@ export class RoomTwinEditor extends LitElement {
     _selected: { state: true },
     _pending: { state: true },
     _floorPoints: { state: true },
+    _stretching: { state: true },
     _entity: { state: true },
     _message: { state: true },
     _copied: { state: true },
@@ -256,6 +260,8 @@ export class RoomTwinEditor extends LitElement {
   private _selected: Selected | null = null;
   private _pending: Vec3 | null = null;
   private _floorPoints: Vec3[] | null = null;
+  // While setting a capsule light's far end with a stage tap.
+  private _stretching = false;
   private _entity = "";
   private _message = "";
   private _copied: "" | "ok" | "failed" = "";
@@ -294,7 +300,7 @@ export class RoomTwinEditor extends LitElement {
     const command = e.ctrlKey || e.metaKey;
     // Layouts without Latin letters, like Cyrillic, still mean Ctrl+Z by the key where Z would be.
     const letter = /^[a-z]$/i.test(e.key) ? e.key.toLowerCase() : e.code.replace(/^Key/, "").toLowerCase();
-    if (e.key === "Escape" && (this._selected || this._pending || this._floorPoints)) {
+    if (e.key === "Escape" && (this._selected || this._pending || this._floorPoints || this._stretching)) {
       e.preventDefault();
       e.stopPropagation();
       this.endTask();
@@ -344,6 +350,14 @@ export class RoomTwinEditor extends LitElement {
       }
       return;
     }
+    if (this._stretching) {
+      this._stretching = false;
+      this.refocus = "task";
+      if (!this._selected) return;
+      this.commit(this.withBinding("light", this._selected.index, { end: point }));
+      this._message = "The light now stretches between its two dots.";
+      return;
+    }
     if (this._selected) {
       const { kind, index } = this._selected;
       this.commit(this.withBinding(kind, index, { anchor: point }));
@@ -363,6 +377,7 @@ export class RoomTwinEditor extends LitElement {
     this._selected = null;
     this._pending = null;
     this._floorPoints = null;
+    this._stretching = false;
     this._entity = "";
     this._message = "";
     this._typing = null;
@@ -382,7 +397,7 @@ export class RoomTwinEditor extends LitElement {
       ((this.refocus === "field" && task?.querySelector<HTMLElement>("input")) || task)?.focus();
     }
     this.refocus = "";
-    if (changed.has("_selected") || changed.has("_pending") || changed.has("config")) {
+    if (changed.has("_selected") || changed.has("_pending") || changed.has("_stretching") || changed.has("config")) {
       this.dispatchEvent(new CustomEvent<HelperDetail>("helper-changed", { detail: this.helper() }));
     }
   }
@@ -390,8 +405,15 @@ export class RoomTwinEditor extends LitElement {
   private helper(): HelperDetail {
     if (this._pending) return { anchor: this._pending, radius: 0, selected: null };
     const binding = this.selectedBinding();
+    if (this._stretching && binding) return { ...this.shapeOf(binding), selected: null };
     if (!binding) return { anchor: null, radius: 0, selected: null };
-    return { anchor: binding.anchor, radius: "radius" in binding ? binding.radius : 0, selected: this._selected };
+    return { ...this.shapeOf(binding), selected: this._selected };
+  }
+
+  /** The helper ring for a binding: a bare point for a pin, the shape for a light. */
+  private shapeOf(binding: LightBinding | PinBinding): { anchor: Vec3; radius: number; end?: Vec3 | null } {
+    if (!("radius" in binding)) return { anchor: binding.anchor, radius: 0 };
+    return { anchor: binding.anchor, radius: binding.radius, end: binding.end ?? null };
   }
 
   private selectedBinding(): LightBinding | PinBinding | undefined {
@@ -589,6 +611,10 @@ export class RoomTwinEditor extends LitElement {
       return html`<p>Tap ${3 - this._floorPoints.length} more point${this._floorPoints.length === 2 ? "" : "s"} on the floor, spread out.</p>
         <div class="row"><button @click=${this.endTask}>Cancel</button></div>`;
     }
+    if (this._stretching) {
+      return html`<p>Tap where <strong>${this.name(this.selectedBinding()?.entity ?? "the light")}</strong> should reach. It lights the stretch from where it is to there, for stairs and hallways.</p>
+        <div class="row"><button @click=${this.endTask}>Cancel</button></div>`;
+    }
     if (this._pending) {
       const entity = this._entity.trim();
       const valid = ENTITY_ID.test(entity);
@@ -627,11 +653,27 @@ export class RoomTwinEditor extends LitElement {
     const binding = this.selectedBinding();
     if (binding && this._selected) {
       const ranges = roomRanges(this.getRoomHeight());
+      const light = this._selected.kind === "light" ? (binding as LightBinding) : null;
       return html`<p><strong>${this.name(binding.entity)}</strong>. Tap the room to move it.</p>
-        ${this._selected.kind === "light"
+        ${light
           ? html`${this.slider("Radius (m)", "radius", Math.max(0.01, ranges.step * 10), ranges.radiusMax, ranges.step)}
             ${this.slider("Soft edge (m)", "soft_edge", 0, ranges.softEdgeMax, ranges.step)}
-            ${this.slider("Brightness when off", "off_dim", 0, 1, 0.01)}`
+            ${this.slider("Brightness when off", "off_dim", 0, 1, 0.01)}
+            <div class="row">
+              <button
+                @click=${() => {
+                  // Keeps the selection: the far end is set on this light.
+                  this._pending = null;
+                  this._floorPoints = null;
+                  this._stretching = true;
+                }}
+              >
+                ${light.end ? "Move the far end" : "Stretch along the room"}
+              </button>
+              ${light.end
+                ? html`<button @click=${() => this.commit(this.withBinding("light", this._selected!.index, { end: undefined }))}>Make it round</button>`
+                : nothing}
+            </div>`
           : nothing}
         ${this.textField("Label", "name", this.hass.states[binding.entity]?.attributes.friendly_name ?? "")}
         ${this.textField("Icon", "icon", String(this.hass.states[binding.entity]?.attributes.icon ?? "The entity's icon"))}

@@ -86,7 +86,7 @@ Admins see a pencil button in the corner. It opens edit mode, which works on the
 
 1. **Set floor (tap 3 points)**: tap three spots spread across the floor. The room turns upright with the floor at height 0. It refuses three points in a line.
 2. **Tap the room** where a lamp or device is. Type or pick an entity, then choose **Add as light** (lights and switches) or **Add as pin** (anything). Pressing Enter in the field does the fitting one: a light for `light.` and `switch.` entities, a pin for anything else.
-3. For a light, set **Radius (m)**, **Soft edge (m)** and **Brightness when off** with the sliders while you watch the room. Flip the real light to check it. **Label** and **Icon** override the entity's name and icon on the pin, for lights and pins alike. New lights start with a radius and soft edge sized to the room.
+3. For a light, set **Radius (m)**, **Soft edge (m)** and **Brightness when off** with the sliders while you watch the room. Flip the real light to check it. For stairs or a hallway, **Stretch along the room** and tap where the light reaches: it lights the whole stretch, shown by a wire capsule with a dot at each end. **Move the far end** redoes it and **Make it round** goes back to a sphere. **Label** and **Icon** override the entity's name and icon on the pin, for lights and pins alike. New lights start with a radius and soft edge sized to the room.
    To change one later, tap its pin in the room or its chip under **In this room**. While it's selected, tapping the room moves it there, **Remove** deletes it and **Done** lets go of it.
 4. Optionally turn on **Ceiling cut** so you can see into the room from above, and press **Use this view as default** once the camera is where you like it.
 5. Press **Save**. The card writes its new config into the dashboard, leaving everything else on it as it was, and Home Assistant redraws the dashboard with it.
@@ -109,12 +109,13 @@ The card's visual editor in the dashboard dialog covers the plain options: the s
 - From the keyboard, Tab to a pin, then Enter or Space taps it, and Shift+Enter or the menu key does what a long-press does. Screen readers hear the pin's name and state. Tab to the room itself and the arrow keys move around it, plus and minus zoom, and Home goes back to the saved view.
 - Sensor pins show the current state with its unit and update live.
 - A pin that is on, open, playing, unlocked, set to heat and so on takes your theme's colour for that state, the way Home Assistant's tiles do, and a coloured light's pin shows the light's colour.
+- With `occlude_pins: true` on the card, a pin behind a wall or other solid room part from where the camera is dims to a quarter once the view stops moving, and hovering it, tabbing to it or selecting it in edit mode brings it fully back. It is off by default, because thin or dark objects occasionally shade a pin that is in plain sight; the Known limits below says more.
 - A pin turns red while it has something to look at: a binary sensor for an open door, window or garage door, or smoke, gas, carbon monoxide, a leak, a safety problem or tampering, and also a jammed lock, a triggered alarm or a vacuum reporting an error.
 - A pin whose entity doesn't exist shows as a grey question mark, so a renamed entity is easy to spot.
 - Where pins crowd together on screen, the one further back hides its label until you hover it, tab to it or select it in edit mode. Its icon stays where the device is. A pin near the right edge puts its label on the left instead, so it isn't cut off.
 - Drag to look around and right-drag to pan. Scrolling over the card scrolls the dashboard as usual, so zoom by holding Ctrl (Cmd on a Mac) while you scroll, or pinch. In edit mode the scroll wheel zooms on its own.
 - On a touch screen, swipe sideways to turn the view and pinch to zoom. An up or down swipe scrolls the dashboard.
-- A card doesn't download its room until it first scrolls into view, and cards that are off-screen or on a hidden tab stop rendering entirely. With the browser's data-saver setting on it doesn't download at all until you press **Load room**, since a scan can be tens of megabytes.
+- A card doesn't download its room until it first scrolls into view, and cards that are off-screen or on a hidden tab stop rendering entirely. One that stays away for a few minutes lets the room's graphics memory go and reloads it when you come back. With the browser's data-saver setting on it doesn't download at all until you press **Load room**, since a scan can be tens of megabytes.
 
 ## Configuration reference
 
@@ -133,6 +134,10 @@ lights:
     radius: 1.2
     soft_edge: 0.6
     off_dim: 0.45
+  - entity: light.stairs
+    anchor: [2.4, 1.9, -1.1]
+    end: [2.1, -2.8, -2.5]
+    radius: 1.0
 pins:
   - entity: sensor.living_room_temperature
     anchor: [-0.9, -1.1, 2.05]
@@ -152,9 +157,11 @@ pins:
 | `aspect_ratio` | `16:9` | Card shape, as `"4:3"` or a number like `1.5`. In a YAML-mode dashboard keep the quotes, because Home Assistant reads an unquoted 16:9 there as the number 969. The card says so if that happens. |
 | `lod` | `true` | Spark's level of detail, which keeps large captures smooth. Leave it on unless a capture renders wrongly. |
 | `lod_scale` | `1` | How many splats level of detail may draw, from 0.1 to 8. Lower it for a slow tablet, raise it on a strong desktop GPU. |
+| `occlude_pins` | `false` | Dim pins that have something solid between them and the camera, since they are behind a wall, to a quarter. Hovering, focusing or selecting one brings it back. Off by default: thin or dark objects can shade a pin that is really in plain sight. |
 | `lights[].entity` | required | A `light` or `switch` entity. |
 | `lights[].anchor` | required | Centre of the lit region, in capture coordinates. Place it with the editor. |
 | `lights[].radius` | `1.0` | Radius of the region the light affects. |
+| `lights[].end` | round | A second point: the light becomes a capsule stretching from `anchor` to here, for stairs and hallways. Set it with the editor. |
 | `lights[].soft_edge` | `0.5` | Width of the fade at the edge of the region. |
 | `lights[].off_dim` | `0.45` | How bright the region looks when the light is off, from 0 (black) to 1 (unchanged). |
 | `lights[].name` | entity name | Label shown on hover, read by screen readers and shown in the editor. |
@@ -193,7 +200,7 @@ With the system's reduce motion setting on, the card skips the camera moves and 
 
 ### How lights change the room
 
-Each light multiplies the colour of the splats inside its soft sphere:
+Each light multiplies the colour of the splats inside its soft shape, a sphere by default or a capsule from `anchor` to `end` for stairs and hallways:
 
 - off, unavailable or missing: `off_dim` on every channel.
 - on: `f = off_dim + (1 - off_dim) × brightness / 255`. A light in a colour mode (`hs`, `xy`, `rgb`, `rgbw`, `rgbww`), or one that reports `rgb_color` without a `color_mode`, is tinted three quarters of the way towards its `rgb_color`, scaled so the brightest channel is 1, so a red bulb still leaves a quarter of the green and blue. Otherwise the tint is white, including white bulbs in `color_temp` mode, since the capture already shows their warmth.
@@ -219,7 +226,8 @@ The card explains every failure it knows about:
 
 ## Known limits
 
-- A light region is a sphere, so it also brightens whatever else is inside it, like the wall behind the lamp. There is no relighting.
+- A light region is a sphere, or a capsule when it has an `end`, so it also brightens whatever else is inside it, like the wall behind the lamp. There is no relighting.
+- Occlusion (`occlude_pins`) is judged against a coarse copy of the room once the camera settles, so a thin curtain can shade a pin it shouldn't and the change lands a moment after the view stops moving. Hover the pin to see through.
 - Where two light spheres overlap their factors multiply, so with both lamps off that spot drops to about 20% rather than 45%. Shrink `radius` or raise `soft_edge` if a corner goes too dark.
 - COLMAP captures have no real-world scale, so the "(m)" on the sliders only means metres for Scaniverse captures.
 - On a touch screen an up or down swipe scrolls the dashboard, so tilting the view up or down with a finger only works in edit mode. Save the tilt you like with **Use this view as default**.

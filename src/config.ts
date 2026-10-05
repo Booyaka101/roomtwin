@@ -17,6 +17,8 @@ export interface LightBinding extends PinBinding {
   radius: number;
   soft_edge: number;
   off_dim: number;
+  /** When set, the light is a capsule from `anchor` to here, for stairs and hallways. */
+  end?: Vec3;
 }
 
 export interface CameraView {
@@ -33,6 +35,8 @@ export interface RoomTwinConfig {
   aspect_ratio?: string | number;
   lod: boolean;
   lod_scale: number;
+  /** Dim pins that are behind walls from the camera's point of view. */
+  occlude_pins: boolean;
   camera?: CameraView;
   lights: LightBinding[];
   pins: PinBinding[];
@@ -58,11 +62,11 @@ export const ENTITY_ID = /^[a-z0-9_]+\.[a-z0-9_]+$/;
 export const ICON = /^[\w-]+:[\w-]+$/;
 
 const TOP_KEYS = [
-  "type", "splat", "up", "floor", "ceiling_cut", "aspect_ratio", "lod", "lod_scale", "camera", "lights", "pins",
+  "type", "splat", "up", "floor", "ceiling_cut", "aspect_ratio", "lod", "lod_scale", "occlude_pins", "camera", "lights", "pins",
   ...PASSTHROUGH,
 ];
 const PIN_KEYS = ["entity", "anchor", "name", "icon", "tap_action", "hold_action", "double_tap_action"];
-const LIGHT_KEYS = [...PIN_KEYS, "radius", "soft_edge", "off_dim"];
+const LIGHT_KEYS = [...PIN_KEYS, "radius", "soft_edge", "off_dim", "end"];
 
 export interface BindingRef extends PinBinding {
   kind: "light" | "pin";
@@ -218,9 +222,14 @@ function binding(value: unknown, path: string, keys: readonly string[]) {
 function light(value: unknown, i: number): LightBinding {
   const path = `lights[${i}]`;
   const { raw, entity, anchor } = binding(value, path, LIGHT_KEYS);
+  const end = unset(raw.end) ? undefined : vec3(raw.end, `${path}.end`);
+  if (end && Math.hypot(end[0] - anchor[0], end[1] - anchor[1], end[2] - anchor[2]) < 1e-6) {
+    throw new ConfigError(`${path}.end must be a different point from ${path}.anchor, or left out for a round light`);
+  }
   return {
     entity,
     anchor,
+    end,
     radius: number(raw.radius, `${path}.radius`, { min: 0.01, fallback: LIGHT_DEFAULTS.radius }),
     soft_edge: number(raw.soft_edge, `${path}.soft_edge`, { min: 0, fallback: LIGHT_DEFAULTS.soft_edge }),
     off_dim: number(raw.off_dim, `${path}.off_dim`, { min: 0, max: 1, fallback: LIGHT_DEFAULTS.off_dim }),
@@ -256,6 +265,9 @@ export function parseConfig(raw: unknown): RoomTwinConfig {
   if (!unset(raw.lod) && typeof raw.lod !== "boolean") {
     throw new ConfigError(`lod must be true or false, got ${describe(raw.lod)}`);
   }
+  if (!unset(raw.occlude_pins) && typeof raw.occlude_pins !== "boolean") {
+    throw new ConfigError(`occlude_pins must be true or false, got ${describe(raw.occlude_pins)}`);
+  }
 
   const config: RoomTwinConfig = {
     type: typeof raw.type === "string" ? raw.type : "custom:roomtwin-card",
@@ -264,6 +276,7 @@ export function parseConfig(raw: unknown): RoomTwinConfig {
     floor: number(raw.floor, "floor", { fallback: 0 }),
     lod: raw.lod !== false,
     lod_scale: number(raw.lod_scale, "lod_scale", { min: 0.1, max: 8, fallback: 1 }),
+    occlude_pins: raw.occlude_pins === true,
     lights: list(raw.lights, "lights").map(light),
     pins: list(raw.pins, "pins").map(pin),
   };
@@ -281,10 +294,15 @@ export function parseConfig(raw: unknown): RoomTwinConfig {
   if (!unset(raw.camera)) {
     if (!isObject(raw.camera)) throw new ConfigError(`camera must have position and target, got ${describe(raw.camera)}`);
     checkKeys(raw.camera, ["position", "target"], "camera.");
-    config.camera = {
+    const camera: CameraView = {
       position: vec3(raw.camera.position, "camera.position"),
       target: vec3(raw.camera.target, "camera.target"),
     };
+    const [px, py, pz] = camera.position;
+    if (Math.hypot(px - camera.target[0], py - camera.target[1], pz - camera.target[2]) < 1e-4) {
+      throw new ConfigError("camera.position and camera.target are the same point, and the camera has nowhere to look. Save a view with the card's editor instead of writing one by hand.");
+    }
+    config.camera = camera;
   }
 
   for (const key of PASSTHROUGH) if (raw[key] !== undefined) config[key] = raw[key];

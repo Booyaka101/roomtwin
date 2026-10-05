@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- A light can stretch: `end` turns it into a capsule from `anchor` to there, for stairs and hallways, with **Stretch along the room**, **Move the far end** and **Make it round** in the editor and a wire capsule shown while editing.
+- Pins behind walls can dim to a quarter once the view stops moving, and come back on hover, keyboard focus or selection in the editor, with `occlude_pins: true` on the card. Off by default, since a thin or dark object can shade a pin that is really in plain sight.
+- A card that stays off-screen or on a hidden tab for a few minutes lets its room's graphics memory go, and downloads it again on return. Dashboards with many room cards hold much less at once.
+- A `camera` whose position and target are the same point is now a configuration error naming both, instead of a black room.
+
 ## 0.1.1
 
 - With the browser's data-saver setting on, a card waits for a **Load room** tap instead of downloading the scan on its own, since a scan can be tens of megabytes.

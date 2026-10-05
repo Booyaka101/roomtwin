@@ -20,6 +20,11 @@ const PREVIEW_LOAD_DELAY_MS = 600;
 const AUTO_RELOAD_GAP_MS = 60_000;
 const TAP_SLOP_PX = 10;
 const TAP_MAX_MS = 500;
+// A card scrolled away or on a hidden tab holds a scene's worth of graphics memory; let it go after this long.
+const OFFSCREEN_DISPOSE_MS = 4 * 60_000;
+// Pin occlusion is raycast work, so it waits for the camera to settle and only sticks two checks in a row.
+const OCCLUSION_SETTLE_MS = 350;
+const OCCLUSION_EVERY_MS = 250;
 
 const MDI_PENCIL =
   "M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z";
@@ -85,6 +90,18 @@ export class RoomTwinCard extends LitElement {
   private disposeTimer?: ReturnType<typeof setTimeout>;
   private intersection?: IntersectionObserver;
   private resize?: ResizeObserver;
+  // Overridable from probes, so the off-screen release can be exercised without waiting minutes.
+  private offscreenDisposeMs = OFFSCREEN_DISPOSE_MS;
+  private offscreenTimer?: ReturnType<typeof setTimeout>;
+  // Pin occlusion, recomputed once the camera settles: value seen, value applied, and when the camera last moved.
+  private occluded: boolean[] = [];
+  private occludedSeen: boolean[] = [];
+  private occlusionFor?: BindingRef[];
+  private occlusionTimer?: ReturnType<typeof setTimeout>;
+  private cameraMovedAt = 0;
+  private readonly lastCameraPos = new THREE.Vector3();
+  private readonly lastCameraQuat = new THREE.Quaternion();
+  private readonly occlWorld = new THREE.Vector3();
   private pinEls: HTMLElement[] = [];
   private pins: BindingRef[] = [];
   private pinPointer?: PointerEvent;
@@ -222,6 +239,10 @@ export class RoomTwinCard extends LitElement {
     this.press.cancel();
     this.press.forget();
     this.onScreen = false;
+    clearTimeout(this.offscreenTimer);
+    this.offscreenTimer = undefined;
+    clearTimeout(this.occlusionTimer);
+    this.occlusionTimer = undefined;
     this.updateActive();
     // A preview card that goes away mid-load has usually been swapped for a new one, so it stops parsing now.
     if (this.preview && this._status.kind === "loading") this.teardown();
@@ -244,8 +265,22 @@ export class RoomTwinCard extends LitElement {
   }
 
   private updateActive = (): void => {
-    this.scene?.setActive(this.isConnected && this.onScreen && document.visibilityState === "visible");
+    const active = this.isConnected && this.onScreen && document.visibilityState === "visible";
+    this.scene?.setActive(active);
+    this.updateOffscreenTimer();
   };
+
+  /** A card that has been off-screen or on a hidden tab for minutes gives its scene back. */
+  private updateOffscreenTimer(): void {
+    clearTimeout(this.offscreenTimer);
+    this.offscreenTimer = undefined;
+    if (this.onScreen || !this.isConnected || this._editing || this.preview || this._status.kind !== "ready") return;
+    this.offscreenTimer = setTimeout(() => {
+      this.offscreenTimer = undefined;
+      if (!this.isConnected || this.onScreen || this._editing || this.preview || this._status.kind !== "ready") return;
+      this.teardown();
+    }, this.offscreenDisposeMs);
+  }
 
   private onVisibility = (): void => {
     this.updateActive();
@@ -264,6 +299,8 @@ export class RoomTwinCard extends LitElement {
   private teardown(): void {
     clearTimeout(this.loadTimer);
     this.loadTimer = undefined;
+    clearTimeout(this.occlusionTimer);
+    this.occlusionTimer = undefined;
     this.abort?.abort();
     this.lights?.dispose();
     this.lights = undefined;
@@ -277,6 +314,7 @@ export class RoomTwinCard extends LitElement {
   protected updated(changed: PropertyValues): void {
     super.updated(changed);
     if (!this.intersection) this.observe();
+    if (changed.has("_status")) this.updateOffscreenTimer();
     const config = this.shown;
     // A room scan is a big bite out of a metered connection, so with data saver on it loads on request.
     this._defer = !this.userLoaded && savingData();
@@ -284,6 +322,15 @@ export class RoomTwinCard extends LitElement {
     const visible = this.onScreen && document.visibilityState === "visible";
     if (config && this.canvasHost && visible && !this._defer && this.loadedKey !== this.loadKey(config)) this.scheduleLoad(config);
     this.pins = config ? refsOf(config) : [];
+    if (this.occlusionFor !== this.pins || !config?.occlude_pins) {
+      this.occlusionFor = config ? this.pins : undefined;
+      this.occluded = this.pins.map(() => false);
+      this.occludedSeen = this.pins.map(() => false);
+      // The camera may not move again, so the fresh state is cast for straight away.
+      if (config?.occlude_pins && this.scene?.mesh && !this.occlusionTimer) {
+        this.occlusionTimer = setTimeout(this.checkOcclusion, OCCLUSION_EVERY_MS);
+      }
+    }
     this.pinEls = [...this.renderRoot.querySelectorAll<HTMLElement>(".pin")];
     this.positionPins();
   }
@@ -382,6 +429,19 @@ export class RoomTwinCard extends LitElement {
     const width = host.clientWidth;
     const height = host.clientHeight;
     scene.camera.updateMatrixWorld();
+    // Occlusion is raycast work, so it waits until the camera has been still for a moment.
+    // OrbitControls re-derives the pose every frame with float noise, so "still" means no move past these epsilons.
+    const now = performance.now();
+    const jolted =
+      this.lastCameraPos.distanceToSquared(scene.camera.position) > 1e-10 || this.lastCameraQuat.angleTo(scene.camera.quaternion) > 1e-6;
+    if (jolted) {
+      this.lastCameraPos.copy(scene.camera.position);
+      this.lastCameraQuat.copy(scene.camera.quaternion);
+      this.cameraMovedAt = now;
+      // No frame renders once the camera stops, so the check is timed from the last move.
+      clearTimeout(this.occlusionTimer);
+      this.occlusionTimer = setTimeout(this.checkOcclusion, OCCLUSION_SETTLE_MS + OCCLUSION_EVERY_MS);
+    }
     // Every read before any write, so a frame lays the pins out once.
     const boxes = this.pinEls.map((el, i): PinBox => {
       const pin = this.pins[i];
@@ -408,7 +468,35 @@ export class RoomTwinCard extends LitElement {
       el.style.visibility = p.visible ? "" : "hidden";
       el.style.zIndex = String(layer[i]);
       el.classList.toggle("tucked", tucked[i]);
+      el.classList.toggle("occluded", p.visible && this.occluded[i]);
     });
+  };
+
+  /** Recasts pin occlusion once the camera has settled, and keeps waiting while it still is moving. */
+  private checkOcclusion = (): void => {
+    this.occlusionTimer = undefined;
+    const scene = this.scene;
+    if (!scene?.mesh || !this.shown?.occlude_pins) return;
+    const now = performance.now();
+    if (now - this.cameraMovedAt < OCCLUSION_SETTLE_MS) {
+      this.occlusionTimer = setTimeout(this.checkOcclusion, OCCLUSION_SETTLE_MS + OCCLUSION_EVERY_MS - (now - this.cameraMovedAt));
+      return;
+    }
+    // Closer than this and a hit is the device the pin sits on or the wall just behind a thin or
+    // dark object, not a wall in front of the pin: slack grows with how far away the pin is.
+    const extent = scene.roomExtent();
+    const camera = scene.camera.position;
+    let pending = false;
+    this.pins.forEach((pin, i) => {
+      const world = scene.captureToWorld(pin.anchor, this.occlWorld);
+      const seen = scene.occludes(world, Math.max(extent / 50, camera.distanceTo(world) * 0.1));
+      // Two casts in a row before a pin changes, so a coarse LoD ray can't flicker it while orbiting.
+      if (seen === this.occludedSeen[i]) this.occluded[i] = seen;
+      else this.occludedSeen[i] = seen;
+      if (this.occluded[i] !== seen) pending = true;
+      this.pinEls[i]?.classList.toggle("occluded", this.occluded[i]);
+    });
+    if (pending) this.occlusionTimer = setTimeout(this.checkOcclusion, OCCLUSION_EVERY_MS);
   };
 
   private fire(type: string, detail: unknown, from: EventTarget = this): void {
@@ -631,7 +719,7 @@ export class RoomTwinCard extends LitElement {
   private getRoomHeight = () => this.scene!.roomBounds().max.y;
 
   private onHelper(e: CustomEvent<HelperDetail>): void {
-    this.scene?.showHelper(e.detail.anchor, e.detail.radius);
+    this.scene?.showHelper(e.detail.anchor, e.detail.radius, e.detail.end);
     this._selected = e.detail.selected;
   }
 
@@ -882,6 +970,7 @@ export class RoomTwinCard extends LitElement {
       white-space: nowrap;
       transition:
         transform 0.15s ease,
+        opacity 0.25s ease,
         border-color 0.3s,
         box-shadow 0.3s;
       animation: pin-in 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.25) backwards;
@@ -919,6 +1008,10 @@ export class RoomTwinCard extends LitElement {
     .pin.tucked:not(:hover, :focus-visible, .selected) .label {
       position: absolute;
       visibility: hidden;
+    }
+    /* Behind a wall from where the camera is: dimmed but findable, and hovering, focusing or selecting it brings it back. */
+    .pin.occluded:not(:hover, :focus-visible, .selected) .face {
+      opacity: 0.25;
     }
     @media (hover: hover) {
       .pin:hover .face {

@@ -155,6 +155,9 @@ export class RoomScene {
   private readonly scene = new THREE.Scene();
   private readonly spark: SparkRenderer;
   private readonly helpers = new THREE.Group();
+  private readonly occlRay = new THREE.Raycaster();
+  private readonly occlOrigin = new THREE.Vector3();
+  private readonly occlDir = new THREE.Vector3();
   private ceiling: SplatEdit | null = null;
   private ceilingSdf: SplatEditSdf | null = null;
   private up = new THREE.Vector3(0, 1, 0);
@@ -304,7 +307,7 @@ export class RoomScene {
   }
 
   /** The room's longest side, or a typical room's when it can't be measured. */
-  private roomExtent(): number {
+  roomExtent(): number {
     const bounds = this.roomBounds();
     return bounds.isEmpty() ? 4 : Math.max(...bounds.getSize(new THREE.Vector3()).toArray());
   }
@@ -438,6 +441,37 @@ export class RoomScene {
   }
 
   /**
+   * Whether something solid stands in front of `world` from the camera, closer than `slack`,
+   * ignoring anything cut away above the ceiling. Casts against Spark's coarse LoD subset.
+   */
+  occludes(world: THREE.Vector3, slack: number): boolean {
+    const mesh = this.mesh;
+    if (!mesh) return false;
+    this.occlOrigin.copy(this.camera.position);
+    const distance = this.occlOrigin.distanceTo(world);
+    if (distance <= slack) return false;
+    this.occlDir.copy(world).sub(this.occlOrigin).normalize();
+    this.occlRay.set(this.occlOrigin, this.occlDir);
+    this.occlRay.near = 0;
+    this.occlRay.far = distance - slack;
+    return this.withRaycastEncoding(() =>
+      this.occlRay.intersectObject(mesh, false).some((h) => this.ceilingHeight === undefined || h.point.y <= this.ceilingHeight),
+    );
+  }
+
+  /** Runs `fn` while Spark's LoD splats are decoded for raycasts, which without the swap let rays pass through walls. */
+  private withRaycastEncoding<T>(fn: () => T): T {
+    const mesh = this.mesh!;
+    const encoding = mesh.packedSplats?.splatEncoding;
+    if (mesh.packedSplats?.lodSplats) mesh.packedSplats.splatEncoding = mesh.packedSplats.lodSplats.splatEncoding;
+    try {
+      return fn();
+    } finally {
+      if (mesh.packedSplats) mesh.packedSplats.splatEncoding = encoding;
+    }
+  }
+
+  /**
    * Capture-space point under a canvas pixel, ignoring anything cut away above the ceiling.
    * Single rays slip between splats on thin objects, so a miss widens to rings of rays around
    * the pixel, like the area under a fingertip, and takes the nearest surface found.
@@ -448,41 +482,37 @@ export class RoomScene {
     const { width, height } = this.renderer.domElement.getBoundingClientRect();
     const raycaster = new THREE.Raycaster();
     // Spark raycasts against a coarse 10-25k LoD subset by default; use what is on screen instead.
-    // Spark 2.2.0 also decodes LoD splats with the base encoding, which halves their opacity and
-    // lets rays pass through walls, so lend it the LoD encoding for the duration of the cast.
     const coarse = mesh.raycastIndices;
-    const packed = mesh.packedSplats;
-    const encoding = packed?.splatEncoding;
     mesh.raycastIndices = undefined;
-    if (packed?.lodSplats) packed.splatEncoding = packed.lodSplats.splatEncoding;
     try {
-      for (const radius of PICK_RINGS_PX) {
-        let nearest: THREE.Intersection | undefined;
-        const rays = radius ? 8 : 1;
-        for (let i = 0; i < rays; i++) {
-          const a = (i / rays) * Math.PI * 2;
-          const px = x + radius * Math.cos(a);
-          const py = y + radius * Math.sin(a);
-          raycaster.setFromCamera(new THREE.Vector2((px / width) * 2 - 1, -(py / height) * 2 + 1), this.camera);
-          const hit = raycaster
-            .intersectObject(mesh, false)
-            .find((h) => this.ceilingHeight === undefined || h.point.y <= this.ceilingHeight);
-          if (hit && (!nearest || hit.distance < nearest.distance)) nearest = hit;
+      return this.withRaycastEncoding(() => {
+        for (const radius of PICK_RINGS_PX) {
+          let nearest: THREE.Intersection | undefined;
+          const rays = radius ? 8 : 1;
+          for (let i = 0; i < rays; i++) {
+            const a = (i / rays) * Math.PI * 2;
+            const px = x + radius * Math.cos(a);
+            const py = y + radius * Math.sin(a);
+            raycaster.setFromCamera(new THREE.Vector2((px / width) * 2 - 1, -(py / height) * 2 + 1), this.camera);
+            const hit = raycaster
+              .intersectObject(mesh, false)
+              .find((h) => this.ceilingHeight === undefined || h.point.y <= this.ceilingHeight);
+            if (hit && (!nearest || hit.distance < nearest.distance)) nearest = hit;
+          }
+          if (nearest) {
+            const p = nearest.point.clone().applyMatrix4(mesh.matrixWorld.clone().invert());
+            return [p.x, p.y, p.z].map((n) => Math.round(n * 1000) / 1000) as Vec3;
+          }
         }
-        if (nearest) {
-          const p = nearest.point.clone().applyMatrix4(mesh.matrixWorld.clone().invert());
-          return [p.x, p.y, p.z].map((n) => Math.round(n * 1000) / 1000) as Vec3;
-        }
-      }
-      return null;
+        return null;
+      });
     } finally {
       mesh.raycastIndices = coarse;
-      if (packed) packed.splatEncoding = encoding;
     }
   }
 
-  /** Outlines a light's sphere (or marks a bare point) while editing. */
-  showHelper(anchor: Vec3 | null, radius = 0): void {
+  /** Outlines a light's shape (or marks a bare point) while editing. */
+  showHelper(anchor: Vec3 | null, radius = 0, end?: Vec3 | null): void {
     this.clearHelpers();
     if (anchor) {
       const center = this.captureToWorld(anchor, new THREE.Vector3());
@@ -492,12 +522,30 @@ export class RoomScene {
       );
       dot.position.copy(center);
       this.helpers.add(dot);
+      if (end) {
+        const endDot = new THREE.Mesh(dot.geometry, dot.material);
+        endDot.position.copy(this.captureToWorld(end, new THREE.Vector3()));
+        this.helpers.add(endDot);
+      }
       if (radius > 0) {
-        const shell = new THREE.LineSegments(
-          new THREE.WireframeGeometry(new THREE.SphereGeometry(radius, 24, 12)),
-          new THREE.LineBasicMaterial({ color: 0xffc107, transparent: true, opacity: 0.35, depthTest: false }),
-        );
-        shell.position.copy(center);
+        let shell: THREE.LineSegments;
+        if (end) {
+          const far = this.captureToWorld(end, new THREE.Vector3());
+          const along = far.clone().sub(center);
+          // CapsuleGeometry's length is the straight mid-section, like Spark's SDF.
+          shell = new THREE.LineSegments(
+            new THREE.WireframeGeometry(new THREE.CapsuleGeometry(radius, along.length(), 6, 14)),
+            new THREE.LineBasicMaterial({ color: 0xffc107, transparent: true, opacity: 0.35, depthTest: false }),
+          );
+          shell.position.copy(center).addScaledVector(along, 0.5);
+          shell.quaternion.setFromUnitVectors(Z_AXIS, along.normalize());
+        } else {
+          shell = new THREE.LineSegments(
+            new THREE.WireframeGeometry(new THREE.SphereGeometry(radius, 24, 12)),
+            new THREE.LineBasicMaterial({ color: 0xffc107, transparent: true, opacity: 0.35, depthTest: false }),
+          );
+          shell.position.copy(center);
+        }
         this.helpers.add(shell);
       }
     }

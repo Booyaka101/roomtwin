@@ -9,6 +9,7 @@ export type Rgb = [number, number, number];
 const COLOR_MODES = new Set(["hs", "xy", "rgb", "rgbw", "rgbww"]);
 // How far a colour pulls the other channels down. At 1 a saturated bulb would black out the other channels.
 const TINT = 0.75;
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
 function validRgb(value: unknown): value is Rgb {
   return (
@@ -49,12 +50,15 @@ interface LightEdit {
 }
 
 /**
- * One MULTIPLY SplatEdit with a single soft sphere per bound light. The edits are children of
- * `parent` (the SplatMesh), so anchors are in the capture's own coordinates.
+ * One MULTIPLY SplatEdit with a single soft shape per bound light: a sphere, or a capsule from
+ * `anchor` to `end` for lights along stairs and hallways. The edits are children of `parent`
+ * (the SplatMesh), so anchors are in the capture's own coordinates.
  */
 export class LightRig {
   private edits: LightEdit[] = [];
   private bindings: LightBinding[] = [];
+  private readonly start = new THREE.Vector3();
+  private readonly dir = new THREE.Vector3();
 
   constructor(private readonly parent: THREE.Object3D) {}
 
@@ -75,10 +79,23 @@ export class LightRig {
     bindings.forEach((binding, i) => {
       const { edit, sdf } = this.edits[i];
       edit.name = `roomtwin ${binding.entity}`;
-      // The fade is centred on the surface, so any wider and even the middle of the sphere stops taking the full colour.
+      // The fade is centred on the surface, so any wider and even the middle of the shape stops taking the full colour.
       edit.softEdge = Math.min(binding.soft_edge, 2 * binding.radius);
       sdf.radius = binding.radius;
-      sdf.position.fromArray(binding.anchor);
+      if (binding.end) {
+        // A capsule: Spark's SDF takes a segment of full length scale.y along local +Y.
+        this.dir.fromArray(binding.end).sub(this.start.fromArray(binding.anchor));
+        const length = this.dir.length();
+        sdf.type = SplatEditSdfType.CAPSULE;
+        sdf.scale.set(1, length, 1);
+        sdf.quaternion.setFromUnitVectors(Y_AXIS, this.dir.normalize());
+        sdf.position.copy(this.start).addScaledVector(this.dir, length / 2);
+      } else {
+        sdf.type = SplatEditSdfType.SPHERE;
+        sdf.scale.set(1, 1, 1);
+        sdf.quaternion.identity();
+        sdf.position.copy(this.start.fromArray(binding.anchor));
+      }
     });
   }
 

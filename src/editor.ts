@@ -391,15 +391,26 @@ export class RoomTwinEditor extends LitElement {
   }
 
   protected updated(changed: PropertyValues): void {
-    if (changed.has("_pending") && this._pending) this.renderRoot.querySelector<HTMLInputElement>("input.entity")?.focus();
+    if (changed.has("_pending") && this._pending) this.focusEntityField();
     else if (this.refocus) {
       const task = this.renderRoot.querySelector<HTMLElement>(".task");
-      ((this.refocus === "field" && task?.querySelector<HTMLElement>("input")) || task)?.focus();
+      ((this.refocus === "field" && task?.querySelector<HTMLElement>("input, ha-entity-picker, ha-icon-picker")) || task)?.focus();
     }
     this.refocus = "";
     if (changed.has("_selected") || changed.has("_pending") || changed.has("_stretching") || changed.has("config")) {
       this.dispatchEvent(new CustomEvent<HelperDetail>("helper-changed", { detail: this.helper() }));
     }
+  }
+
+  /** Focuses the entity field after a pick. ha-entity-picker keeps its input in a shadow root of its own. */
+  private focusEntityField(): void {
+    void this.updateComplete.then(() => {
+      const el = this.renderRoot.querySelector<HTMLElement>("input.entity, ha-entity-picker");
+      el?.focus();
+      if (el && el.tagName !== "INPUT" && document.activeElement !== el) {
+        (el.shadowRoot?.querySelector("input") as HTMLElement | null)?.focus();
+      }
+    });
   }
 
   private helper(): HelperDetail {
@@ -606,6 +617,58 @@ export class RoomTwinEditor extends LitElement {
     this.add(LIGHT_DOMAINS.has(domainOf(entity)) ? "light" : "pin", e);
   }
 
+  /** The entity field: Home Assistant's own searching picker, or a plain input with a suggestion list. */
+  private entityField(placed: Set<string>) {
+    const onValue = (value: string) => {
+      this._entity = value;
+      this.requestUpdate();
+    };
+    if (customElements.get("ha-entity-picker")) {
+      return html`<ha-entity-picker
+        class="entity"
+        .hass=${this.hass}
+        .value=${this._entity}
+        label="Entity"
+        allow-custom-entity
+        @value-changed=${(e: CustomEvent<{ value: string }>) => onValue(e.detail.value)}
+      ></ha-entity-picker>`;
+    }
+    return html`<input
+        class="entity"
+        list="entities"
+        aria-label="Entity id"
+        autocapitalize="off"
+        autocorrect="off"
+        spellcheck="false"
+        placeholder="light.floor_lamp"
+        .value=${this._entity}
+        @input=${(e: Event) => onValue((e.target as HTMLInputElement).value)}
+        @keydown=${this.onEntityKey}
+      />
+      <datalist id="entities">
+        ${this.ids.map((id) => {
+          const name = this.hass.states[id]?.attributes.friendly_name ?? "";
+          return html`<option value=${id}>${placed.has(id) ? `${name} (already in this room)`.trimStart() : name}</option>`;
+        })}
+      </datalist>`;
+  }
+
+  /** The icon field: Home Assistant's own icon picker, or a plain input that checks the name as it's typed. */
+  private iconField(selected: Selected, placeholder: string) {
+    const commit = (value: string) =>
+      this.commit(this.withBinding(selected.kind, selected.index, { icon: value.trim() || undefined }), `icon:${selected.kind}:${selected.index}`);
+    if (customElements.get("ha-icon-picker")) {
+      return html`<label class="slider"
+        ><span>Icon</span
+        ><ha-icon-picker
+          .value=${this.selectedBinding()?.icon ?? ""}
+          label="Icon"
+          @value-changed=${(e: CustomEvent<{ value: string }>) => commit(e.detail.value)}
+      /></label>`;
+    }
+    return this.textField("Icon", "icon", placeholder);
+  }
+
   private renderTask() {
     if (this._floorPoints) {
       return html`<p>Tap ${3 - this._floorPoints.length} more point${this._floorPoints.length === 2 ? "" : "s"} on the floor, spread out.</p>
@@ -621,24 +684,7 @@ export class RoomTwinEditor extends LitElement {
       const known = valid && entity in this.hass.states;
       const placed = new Set(bindingRefs(this.config).map((b) => b.entity));
       return html`<p>New point at [${this._pending.join(", ")}]. Which entity goes here?</p>
-        <input
-          class="entity"
-          list="entities"
-          aria-label="Entity id"
-          autocapitalize="off"
-          autocorrect="off"
-          spellcheck="false"
-          placeholder="light.floor_lamp"
-          .value=${this._entity}
-          @input=${(e: Event) => (this._entity = (e.target as HTMLInputElement).value)}
-          @keydown=${this.onEntityKey}
-        />
-        <datalist id="entities">
-          ${this.ids.map((id) => {
-            const name = this.hass.states[id]?.attributes.friendly_name ?? "";
-            return html`<option value=${id}>${placed.has(id) ? `${name} (already in this room)`.trimStart() : name}</option>`;
-          })}
-        </datalist>
+        ${this.entityField(placed)}
         ${entity && !valid
           ? html`<p class="note">Entity ids look like light.floor_lamp: a domain, a dot, then lowercase letters, digits and underscores.</p>`
           : valid && !known
@@ -676,7 +722,7 @@ export class RoomTwinEditor extends LitElement {
             </div>`
           : nothing}
         ${this.textField("Label", "name", this.hass.states[binding.entity]?.attributes.friendly_name ?? "")}
-        ${this.textField("Icon", "icon", String(this.hass.states[binding.entity]?.attributes.icon ?? "The entity's icon"))}
+        ${this.iconField(this._selected, String(this.hass.states[binding.entity]?.attributes.icon ?? "The entity's icon"))}
         <div class="row">
           <button @click=${this.endTask}>Done</button>
           <button class="danger" @click=${this.removeSelected}>Remove</button>
@@ -916,6 +962,13 @@ export class RoomTwinEditor extends LitElement {
       border-color: var(--accent);
     }
     input.entity {
+      width: 100%;
+      box-sizing: border-box;
+    }
+    /* HA's own pickers bring their own field styling; they just need to fill the row. */
+    .slider ha-entity-picker,
+    .slider ha-icon-picker,
+    .task ha-entity-picker {
       width: 100%;
       box-sizing: border-box;
     }

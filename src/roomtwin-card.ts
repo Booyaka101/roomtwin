@@ -317,7 +317,8 @@ export class RoomTwinCard extends LitElement {
     if (changed.has("_status")) this.updateOffscreenTimer();
     const config = this.shown;
     // A room scan is a big bite out of a metered connection, so with data saver on it loads on request.
-    this._defer = !this.userLoaded && savingData();
+    // A preview card is the dashboard's own editor dialog, where the file is already the point, so it skips the gate.
+    this._defer = !this.userLoaded && !this.preview && savingData();
     // Waiting until the card is on screen keeps a dashboard of rooms from downloading all of them at once.
     const visible = this.onScreen && document.visibilityState === "visible";
     if (config && this.canvasHost && visible && !this._defer && this.loadedKey !== this.loadKey(config)) this.scheduleLoad(config);

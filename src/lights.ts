@@ -27,8 +27,11 @@ function validRgb(value: unknown): value is Rgb {
  */
 export function lightColor(state: HassEntity | undefined, offDim: number): Rgb {
   if (!state || state.state !== "on") return [offDim, offDim, offDim];
+  // A light may report either scale; HA's own frontend takes brightness first, like this.
   const raw = state.attributes.brightness;
-  const brightness = typeof raw === "number" && Number.isFinite(raw) ? Math.min(Math.max(raw, 0), 255) : 255;
+  const pct = state.attributes.brightness_pct;
+  const scale = typeof raw === "number" && Number.isFinite(raw) ? raw : typeof pct === "number" && Number.isFinite(pct) ? pct * 2.55 : 255;
+  const brightness = Math.min(Math.max(scale, 0), 255);
   const f = offDim + (1 - offDim) * (brightness / 255);
   const rgb = colorOf(state);
   if (!rgb) return [f, f, f];

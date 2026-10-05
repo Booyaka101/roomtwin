@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- In Home Assistant, the editor's entity field is HA's own entity picker, which searches friendly names, and the icon field is HA's icon picker. Elsewhere (the live demo) the plain input and its suggestion list remain, and Enter there still adds the entity the fitting way.
+- A light that reports only `brightness_pct` now scales its region of the room correctly instead of always reading full brightness.
+- The dashboard editor's card preview no longer waits out the data-saver **Load room** gate: opening that dialog is already asking for the file.
+
 ## 0.2.0
 
 - A light can stretch: `end` turns it into a capsule from `anchor` to there, for stairs and hallways, with **Stretch along the room**, **Move the far end** and **Make it round** in the editor and a wire capsule shown while editing.

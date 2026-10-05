@@ -1,6 +1,6 @@
 {
   "name": "roomtwin-card",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Home Assistant dashboard card that shows a Gaussian splat of your room and binds lights and sensors to where they really are",
   "license": "MIT",
   "author": "Booyaka101",

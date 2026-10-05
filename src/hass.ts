@@ -7,6 +7,7 @@ export interface HassEntity {
     friendly_name?: string;
     unit_of_measurement?: string;
     brightness?: number | null;
+    brightness_pct?: number | null;
     rgb_color?: [number, number, number] | null;
   };
   last_changed: string;

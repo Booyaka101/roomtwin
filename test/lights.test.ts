@@ -43,6 +43,13 @@ describe("lightColor", () => {
     expectRgb(lightColor(entity("switch.lamp", "on"), 0.45), [1, 1, 1]);
   });
 
+  test("a light reporting only brightness_pct still scales the room", () => {
+    expectRgb(lightColor(entity("light.lamp", "on", { brightness: null, brightness_pct: 50 }), 0.45), [0.725, 0.725, 0.725]);
+    expectRgb(lightColor(entity("light.lamp", "on", { brightness_pct: 100 }), 0.45), [1, 1, 1]);
+    // brightness wins when both are there, as in HA.
+    expectRgb(lightColor(entity("light.lamp", "on", { brightness: 128, brightness_pct: 100 }), 0.45), [0.72608, 0.72608, 0.72608]);
+  });
+
   test("null brightness or a black rgb_color fall back to plain white", () => {
     expectRgb(lightColor(entity("light.lamp", "on", { brightness: null, rgb_color: [0, 0, 0] }), 0.45), [1, 1, 1]);
   });

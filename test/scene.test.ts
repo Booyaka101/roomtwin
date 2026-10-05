@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { expect, test } from "vitest";
-import { Flight, PLY_WARN_BYTES, httpErrorMessage, plyWarning } from "../src/scene";
+import { Flight, PLY_WARN_BYTES, httpErrorMessage, plyWarning, savingData } from "../src/scene";
 
 test("a 404 under /local names the URL and the folder it maps to", () => {
   expect(httpErrorMessage("/local/roomtwin/living.spz", 404, "Not Found")).toBe(
@@ -19,6 +19,13 @@ test("large .ply files get a warning recommending .spz", () => {
   );
   expect(plyWarning("/local/roomtwin/big.ply", PLY_WARN_BYTES)).toBeUndefined();
   expect(plyWarning("/local/roomtwin/big.spz", PLY_WARN_BYTES * 3)).toBeUndefined();
+});
+
+test("data saver only defers a load when the connection says so", () => {
+  expect(savingData({ saveData: true })).toBe(true);
+  expect(savingData({ saveData: false })).toBe(false);
+  expect(savingData({})).toBe(false);
+  expect(savingData(undefined)).toBe(false);
 });
 
 const around = (theta: number) => new THREE.Vector3().setFromSpherical(new THREE.Spherical(2, Math.PI / 2, theta));

@@ -7,6 +7,8 @@ It ships with the Playroom from the Deep Blending dataset and some made-up devic
 - `demo/room.spz`: the scan. Any format the card reads works (`room.ply`, `room.sog` and so on), but keep it under 100 MB, which is GitHub's limit for one file. Above 50 MB the build warns, because phone visitors will wait for it.
 - `demo/room.yaml`: the card config. Place your lights and pins on your own dashboard, press **Copy YAML** in the editor and paste it in. The `splat` URL in it doesn't matter, the build points it at the scan.
 
+The build also copies `docs/tap-the-lamp.gif` (the README's GIF) into the page as its `og:image`, the picture social sites show for a link to the demo. Record your own with the same name and the preview follows, or edit the meta tags in `demo/index.html`.
+
 The scan becomes public the moment you push it, and anyone can download the file. Look around it for photos, post, screens or anything else you wouldn't put online.
 
 ## Simulated devices

@@ -67,6 +67,15 @@ export function webgl2Available(): boolean {
   }
 }
 
+/**
+ * Whether the browser or operating system asked for data saver, where a scan that can run to
+ * tens of megabytes shouldn't download without someone asking for it.
+ */
+export function savingData(connection?: { saveData?: boolean }): boolean {
+  const network = connection ?? (typeof navigator === "object" ? (navigator as { connection?: { saveData?: boolean } }).connection : undefined);
+  return network?.saveData === true;
+}
+
 /** Message shown for an HTTP failure fetching the splat, with the fix for the common /local mistakes. */
 export function httpErrorMessage(url: string, status: number, statusText: string): string {
   const base = `Could not load ${url} (HTTP ${status}${statusText ? " " + statusText : ""}).`;

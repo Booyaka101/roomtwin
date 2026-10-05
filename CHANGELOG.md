@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1
+
+- With the browser's data-saver setting on, a card waits for a **Load room** tap instead of downloading the scan on its own, since a scan can be tens of megabytes.
+- Undo and redo keep the editor's selection on the same light or pin wherever it moved, so two bindings on one entity can no longer swap selection.
+- Pressing Enter in the editor's entity field adds it: as a light for `light.` and `switch.` entities, as a pin for anything else.
+- The demo page ships a preview image (`og:image`), so links to it show the card in action.
+
 ## 0.1.0
 
 First release.

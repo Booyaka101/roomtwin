@@ -110,6 +110,9 @@ await bundle.close();
 copyFileSync(join(root, "demo", "index.html"), join(out, "index.html"));
 copyFileSync(card, join(out, "roomtwin-card.js"));
 copyFileSync(splat, join(out, `room.${splatExt}`));
+// The page's preview image for link previews. README.md explains how to replace it with your own.
+const preview = join(root, "docs", "tap-the-lamp.gif");
+if (existsSync(preview)) copyFileSync(preview, join(out, "tap-the-lamp.gif"));
 writeFileSync(
   join(out, "config.json"),
   JSON.stringify({ config: { ...config, splat: `room.${splatExt}` }, states, yaml: readFileSync(configPath, "utf8").trim() }),

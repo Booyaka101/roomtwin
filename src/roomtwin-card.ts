@@ -7,7 +7,7 @@ import { toCardConfig, toYaml, type HelperDetail, type RoomTwinEditor, type Sele
 import type { HassEntity, HomeAssistant } from "./hass";
 import { LightRig } from "./lights";
 import { PressGesture, activeColor, flipsLabel, pinLabel, pinState, projectToScreen, spokenState, tapService, tuckedLabels, type PinBox } from "./pins";
-import { RoomScene, SplatLoadError, webgl2Available, type Motion } from "./scene";
+import { RoomScene, SplatLoadError, savingData, webgl2Available, type Motion } from "./scene";
 import { VERSION } from "./version";
 
 // Long enough to flip between dashboard views without re-downloading the splat.
@@ -51,6 +51,7 @@ export class RoomTwinCard extends LitElement {
     _warning: { state: true },
     _hint: { state: true },
     _selected: { state: true },
+    _defer: { state: true },
   };
 
   /** Set by HA in dashboard edit mode and in the card editor, where HA owns the config being edited. */
@@ -69,6 +70,9 @@ export class RoomTwinCard extends LitElement {
   private _status: Status = { kind: "loading", progress: 0 };
   private _warning = "";
   private _hint = "";
+  // The browser's data saver is on, so the room waits for a Load room tap.
+  private _defer = false;
+  private userLoaded = false;
   // The editor's selection, ringed on the stage.
   private _selected: Selected | null = null;
   private hintTimer?: ReturnType<typeof setTimeout>;
@@ -274,9 +278,11 @@ export class RoomTwinCard extends LitElement {
     super.updated(changed);
     if (!this.intersection) this.observe();
     const config = this.shown;
+    // A room scan is a big bite out of a metered connection, so with data saver on it loads on request.
+    this._defer = !this.userLoaded && savingData();
     // Waiting until the card is on screen keeps a dashboard of rooms from downloading all of them at once.
     const visible = this.onScreen && document.visibilityState === "visible";
-    if (config && this.canvasHost && visible && this.loadedKey !== this.loadKey(config)) this.scheduleLoad(config);
+    if (config && this.canvasHost && visible && !this._defer && this.loadedKey !== this.loadKey(config)) this.scheduleLoad(config);
     this.pins = config ? refsOf(config) : [];
     this.pinEls = [...this.renderRoot.querySelectorAll<HTMLElement>(".pin")];
     this.positionPins();
@@ -345,6 +351,12 @@ export class RoomTwinCard extends LitElement {
 
   private retry(): void {
     this.loadedKey = "";
+    this.requestUpdate();
+  }
+
+  private loadNow(): void {
+    this.userLoaded = true;
+    this._defer = false;
     this.requestUpdate();
   }
 
@@ -657,6 +669,12 @@ export class RoomTwinCard extends LitElement {
   private renderStatus() {
     const status = this._status;
     if (status.kind === "ready") return nothing;
+    if (this._defer) {
+      return html`<div class="overlay">
+        <span>Data saver is on in this browser, so the room hasn't been downloaded. A scan can be tens of megabytes.</span>
+        <button class="retry" @click=${this.loadNow}>Load room</button>
+      </div>`;
+    }
     if (status.kind === "loading") {
       const text = status.progress < 1 ? `Loading room ${Math.round(status.progress * 100)}%` : "Preparing room";
       const percent = Math.round(status.progress * 100);
@@ -978,6 +996,7 @@ export class RoomTwinCard extends LitElement {
       text-align: center;
     }
     .overlay span {
+      max-width: 460px;
       font-size: 13px;
       letter-spacing: 0.02em;
       font-variant-numeric: tabular-nums;

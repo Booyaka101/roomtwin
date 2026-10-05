@@ -195,6 +195,26 @@ export const LIGHT_DOMAINS = new Set(["light", "switch"]);
 
 export type Selected = Pick<BindingRef, "kind" | "index">;
 
+/**
+ * Where a selection lands after an undo or redo moved the config from `before` to `after`: on the
+ * same binding wherever it now sits, by object identity. The binding itself only misses that when
+ * the step replaced it, in which case the slot still holding that binding's earlier self keeps the
+ * selection. A same-entity neighbour that slid into the slot doesn't: two bindings on one entity
+ * can't swap places unnoticed.
+ */
+export function followSelection(selected: Selected | null, before: RoomTwinConfig, after: RoomTwinConfig): Selected | null {
+  if (!selected) return null;
+  // Config fields are plural: lights and pins.
+  const list = selected.kind === "light" ? before.lights : before.pins;
+  const next = selected.kind === "light" ? after.lights : after.pins;
+  const was = list[selected.index];
+  if (!was) return null;
+  const moved = next.indexOf(was);
+  if (moved >= 0) return { kind: selected.kind, index: moved };
+  const landed = next[selected.index];
+  return landed && landed.entity === was.entity && !list.includes(landed) ? selected : null;
+}
+
 export interface HelperDetail {
   anchor: Vec3 | null;
   radius: number;
@@ -418,13 +438,13 @@ export class RoomTwinEditor extends LitElement {
   }
 
   private restore(config: RoomTwinConfig): void {
-    const selected = this.selectedBinding()?.entity;
+    const before = this.config;
     this.dragging = "";
     this._typing = null;
     this._message = "";
     this.show(config);
-    // Undoing a removal shifts the indexes, so keep the selection only if it still points at the same entity.
-    if (this.selectedBinding()?.entity !== selected) this._selected = null;
+    // Undoing a removal shifts the indexes, so the selection follows the binding itself.
+    this._selected = followSelection(this._selected, before, config);
   }
 
   private endDrag(): void {
@@ -438,7 +458,7 @@ export class RoomTwinEditor extends LitElement {
     this.dispatchEvent(new CustomEvent<RoomTwinConfig>("draft-changed", { detail: config }));
   }
 
-  private add(kind: "light" | "pin", e: MouseEvent): void {
+  private add(kind: "light" | "pin", e: { detail: number }): void {
     if (!this._pending) return;
     const entity = this._entity.trim();
     const anchor = this._pending;
@@ -555,6 +575,15 @@ export class RoomTwinEditor extends LitElement {
     /></label>`;
   }
 
+  /** Enter adds the entity where it fits: a light or switch as a light, anything else as a pin. */
+  private onEntityKey(e: KeyboardEvent): void {
+    if (e.key !== "Enter") return;
+    const entity = this._entity.trim();
+    if (!ENTITY_ID.test(entity)) return;
+    e.preventDefault();
+    this.add(LIGHT_DOMAINS.has(domainOf(entity)) ? "light" : "pin", e);
+  }
+
   private renderTask() {
     if (this._floorPoints) {
       return html`<p>Tap ${3 - this._floorPoints.length} more point${this._floorPoints.length === 2 ? "" : "s"} on the floor, spread out.</p>
@@ -576,6 +605,7 @@ export class RoomTwinEditor extends LitElement {
           placeholder="light.floor_lamp"
           .value=${this._entity}
           @input=${(e: Event) => (this._entity = (e.target as HTMLInputElement).value)}
+          @keydown=${this.onEntityKey}
         />
         <datalist id="entities">
           ${this.ids.map((id) => {

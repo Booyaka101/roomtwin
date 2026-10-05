@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { parse } from "yaml";
-import { parseConfig, type Vec3 } from "../src/config";
-import { CollinearError, floorFromPoints, roomRanges, toCardConfig, toYaml } from "../src/editor";
+import { parseConfig, type RoomTwinConfig, type Vec3 } from "../src/config";
+import { CollinearError, floorFromPoints, followSelection, roomRanges, toCardConfig, toYaml } from "../src/editor";
 
 describe("floorFromPoints", () => {
   test("a level floor gives +Y up and its height", () => {
@@ -142,6 +142,45 @@ describe("toYaml", () => {
     expect(yaml).toContain('"#states > div": "padding: 0;"');
     expect(yaml).toContain("grid_options: {}");
     expect(parseConfig(parse(yaml))).toEqual(config);
+  });
+});
+
+describe("followSelection", () => {
+  const config = parseConfig({
+    type: "custom:roomtwin-card",
+    splat: "/local/roomtwin/living.spz",
+    lights: [{ entity: "light.desk", anchor: [0, 0, 0], radius: 1, soft_edge: 0.5, off_dim: 0.45 }],
+    pins: [
+      { entity: "light.desk", anchor: [1, 0, 0] },
+      { entity: "light.desk", anchor: [2, 0, 0] },
+      { entity: "sensor.temperature", anchor: [3, 0, 0] },
+    ],
+  });
+
+  test("follows the same binding when an undo removes one before it", () => {
+    const after: RoomTwinConfig = { ...config, pins: config.pins.slice(1) };
+    expect(followSelection({ kind: "pin", index: 2 }, config, after)).toEqual({ kind: "pin", index: 1 });
+    expect(followSelection({ kind: "light", index: 0 }, config, { ...config, lights: [] })).toBeNull();
+  });
+
+  test("keeps the slot when the step only replaced the selected binding", () => {
+    const moved: RoomTwinConfig = {
+      ...config,
+      pins: config.pins.map((p, i) => (i === 1 ? { ...p, anchor: [9, 9, 9] as Vec3 } : p)),
+    };
+    expect(followSelection({ kind: "pin", index: 1 }, moved, config)).toEqual({ kind: "pin", index: 1 });
+  });
+
+  test("clears when the binding is gone and a same-entity neighbour slid into its slot", () => {
+    const added: RoomTwinConfig = { ...config, pins: [{ entity: "light.desk", anchor: [5, 0, 0] }, ...config.pins] };
+    expect(followSelection({ kind: "pin", index: 0 }, added, config)).toBeNull();
+  });
+
+  test("clears when the selected binding itself was undone away", () => {
+    const added: RoomTwinConfig = { ...config, pins: [...config.pins, { entity: "light.hall", anchor: [4, 0, 0] }] };
+    expect(followSelection({ kind: "pin", index: 3 }, added, config)).toBeNull();
+    expect(followSelection(null, config, config)).toBeNull();
+    expect(followSelection({ kind: "pin", index: 9 }, config, config)).toBeNull();
   });
 });
 

@@ -85,7 +85,7 @@ Drag to orbit, right-drag or two-finger drag to pan, Ctrl+scroll or pinch to zoo
 Admins see a pencil button in the corner. It opens edit mode, which works on the live room:
 
 1. **Set floor (tap 3 points)**: tap three spots spread across the floor. The room turns upright with the floor at height 0. It refuses three points in a line.
-2. **Tap the room** where a lamp or device is. Type or pick an entity, then choose **Add as light** (lights and switches) or **Add as pin** (anything).
+2. **Tap the room** where a lamp or device is. Type or pick an entity, then choose **Add as light** (lights and switches) or **Add as pin** (anything). Pressing Enter in the field does the fitting one: a light for `light.` and `switch.` entities, a pin for anything else.
 3. For a light, set **Radius (m)**, **Soft edge (m)** and **Brightness when off** with the sliders while you watch the room. Flip the real light to check it. **Label** and **Icon** override the entity's name and icon on the pin, for lights and pins alike. New lights start with a radius and soft edge sized to the room.
    To change one later, tap its pin in the room or its chip under **In this room**. While it's selected, tapping the room moves it there, **Remove** deletes it and **Done** lets go of it.
 4. Optionally turn on **Ceiling cut** so you can see into the room from above, and press **Use this view as default** once the camera is where you like it.
@@ -114,7 +114,7 @@ The card's visual editor in the dashboard dialog covers the plain options: the s
 - Where pins crowd together on screen, the one further back hides its label until you hover it, tab to it or select it in edit mode. Its icon stays where the device is. A pin near the right edge puts its label on the left instead, so it isn't cut off.
 - Drag to look around and right-drag to pan. Scrolling over the card scrolls the dashboard as usual, so zoom by holding Ctrl (Cmd on a Mac) while you scroll, or pinch. In edit mode the scroll wheel zooms on its own.
 - On a touch screen, swipe sideways to turn the view and pinch to zoom. An up or down swipe scrolls the dashboard.
-- A card doesn't download its room until it first scrolls into view, and cards that are off-screen or on a hidden tab stop rendering entirely.
+- A card doesn't download its room until it first scrolls into view, and cards that are off-screen or on a hidden tab stop rendering entirely. With the browser's data-saver setting on it doesn't download at all until you press **Load room**, since a scan can be tens of megabytes.
 
 ## Configuration reference
 
